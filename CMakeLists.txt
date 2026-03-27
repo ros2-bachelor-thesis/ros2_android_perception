@@ -6,8 +6,16 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Dependencies
+set(OpenCV_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/opencv-mobile-4.13.0-android/sdk/native/jni")
 find_package(OpenCV REQUIRED COMPONENTS core imgproc)
-find_package(Eigen3 REQUIRED)
+
+# Eigen3 (header-only library)
+set(EIGEN3_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/eigen")
+add_library(Eigen3::Eigen INTERFACE IMPORTED)
+set_target_properties(Eigen3::Eigen PROPERTIES
+  INTERFACE_INCLUDE_DIRECTORIES "${EIGEN3_INCLUDE_DIR}"
+)
+
 find_package(ncnn REQUIRED)
 
 # Perception library (static for Android)
@@ -24,12 +32,14 @@ add_library(${PROJECT_NAME} STATIC
 
 target_include_directories(${PROJECT_NAME} PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/deps/ncnn/build-android/build/install/include>
   $<INSTALL_INTERFACE:include>
 )
 
 target_link_libraries(${PROJECT_NAME} PUBLIC
   ncnn
-  ${OpenCV_LIBS}
+  opencv_core
+  opencv_imgproc
   Eigen3::Eigen
 )
 

@@ -10,7 +10,3 @@ repositories:
     type: git
     url: https://gitlab.com/libeigen/eigen.git
     version: master
-  opencv-mobile:
-    type: git
-    url: https://github.com/nihui/opencv-mobile.git
-    version: master

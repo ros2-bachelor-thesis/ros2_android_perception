@@ -23,7 +23,7 @@ NPROC := $(shell nproc)
 
 # Android SDK/NDK configuration (checked only when building)
 ANDROID_ABI := arm64-v8a
-ANDROID_PLATFORM := android-21
+ANDROID_PLATFORM := android-33
 
 ifdef ANDROID_HOME
 TOOLCHAIN_FILE := $(shell ls $(ANDROID_HOME)/ndk/*/build/cmake/android.toolchain.cmake 2>/dev/null | head -1)
@@ -56,6 +56,9 @@ all: lib
 deps: $(DEPS_STAMP)
 
 $(DEPS_STAMP): perception.repos
+	@echo "==> Initializing git submodules..."
+	git submodule init
+	git submodule update
 	@echo "==> Fetching dependencies via vcs..."
 	vcs import --input perception.repos $(DEPS_DIR)/
 	@touch $(DEPS_STAMP)
@@ -71,6 +74,8 @@ endif
 ifeq ($(TOOLCHAIN_FILE),)
 	$(error Android NDK not found in $(ANDROID_HOME)/ndk/)
 endif
+	@echo "==> Initializing NCNN submodules..."
+	cd $(DEPS_DIR)/ncnn && git submodule update --init --recursive
 	@echo "==> Building NCNN for Android arm64-v8a..."
 	@mkdir -p $(DEPS_DIR)/ncnn/build-android
 	cd $(DEPS_DIR)/ncnn/build-android && cmake .. \
@@ -93,11 +98,16 @@ opencv: $(OPENCV_STAMP)
 
 $(OPENCV_STAMP): $(DEPS_STAMP)
 	@echo "==> Setting up OpenCV-mobile..."
-	@# opencv-mobile provides prebuilt binaries
-	@if [ -d "$(DEPS_DIR)/opencv-mobile/sdk" ]; then \
-		echo "Using opencv-mobile prebuilt"; \
+	@mkdir -p $(DEPS_DIR)
+	@if [ ! -d "$(DEPS_DIR)/opencv-mobile-4.13.0-android/sdk" ]; then \
+		echo "==> Downloading opencv-mobile 4.13.0 for Android..."; \
+		curl -L -o $(DEPS_DIR)/opencv-mobile-android.zip \
+			https://github.com/nihui/opencv-mobile/releases/latest/download/opencv-mobile-4.13.0-android.zip; \
+		echo "==> Extracting opencv-mobile..."; \
+		unzip -q $(DEPS_DIR)/opencv-mobile-android.zip -d $(DEPS_DIR)/; \
+		rm $(DEPS_DIR)/opencv-mobile-android.zip; \
 	else \
-		echo "WARNING: opencv-mobile not found, will use system OpenCV"; \
+		echo "Using opencv-mobile prebuilt"; \
 	fi
 	@touch $(OPENCV_STAMP)
 	@echo "==> OpenCV setup complete"
@@ -111,7 +121,7 @@ $(LIB_STAMP): $(NCNN_STAMP) $(OPENCV_STAMP) CMakeLists.txt $(LIB_SOURCES)
 	@echo "==> Building perception library..."
 	@mkdir -p $(BUILD_DIR)
 	cd $(BUILD_DIR) && cmake .. $(CMAKE_ARGS) \
-		-Dncnn_DIR=$(INSTALL_DIR)/lib/cmake/ncnn
+		-Dncnn_DIR=$(CURDIR)/$(DEPS_DIR)/ncnn/build-android/build/install/lib/cmake/ncnn
 	cd $(BUILD_DIR) && $(MAKE) -j$(NPROC)
 	@touch $(LIB_STAMP)
 	@echo "==> Library built: $(BUILD_DIR)/libros2_android_perception.a"

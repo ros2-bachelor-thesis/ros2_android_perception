@@ -10,14 +10,13 @@ DEPS_DIR := deps
 BUILD_TYPE ?= RelWithDebInfo
 NPROC := $(shell nproc)
 
-# Android NDK configuration
-ifndef ANDROID_NDK
-$(error ANDROID_NDK not set. Run: export ANDROID_NDK=/path/to/android/ndk)
-endif
-
+# Android SDK/NDK configuration (checked only when building)
 ANDROID_ABI := arm64-v8a
 ANDROID_PLATFORM := android-21
-TOOLCHAIN_FILE := $(ANDROID_NDK)/build/cmake/android.toolchain.cmake
+
+ifdef ANDROID_HOME
+TOOLCHAIN_FILE := $(shell ls $(ANDROID_HOME)/ndk/*/build/cmake/android.toolchain.cmake 2>/dev/null | head -1)
+endif
 
 # CMake arguments for Android cross-compilation
 CMAKE_ARGS := \
@@ -63,6 +62,12 @@ $(DEPS_STAMP): perception.repos
 ncnn: $(NCNN_STAMP)
 
 $(NCNN_STAMP): $(DEPS_STAMP)
+ifndef ANDROID_HOME
+	$(error ANDROID_HOME not set. Run: export ANDROID_HOME=~/Android/Sdk)
+endif
+ifeq ($(TOOLCHAIN_FILE),)
+	$(error Android NDK not found in $(ANDROID_HOME)/ndk/)
+endif
 	@echo "==> Building NCNN for Android arm64-v8a..."
 	@mkdir -p $(DEPS_DIR)/ncnn/build-android
 	cd $(DEPS_DIR)/ncnn/build-android && cmake .. \
@@ -153,8 +158,8 @@ help:
 	@echo "ROS 2 Android Perception Build System"
 	@echo ""
 	@echo "Prerequisites:"
-	@echo "  export ANDROID_NDK=/path/to/ndk"
-	@echo "  Example: export ANDROID_NDK=~/Android/Sdk/ndk/25.1.8937393"
+	@echo "  export ANDROID_HOME=/path/to/android/sdk"
+	@echo "  Example: export ANDROID_HOME=~/Android/Sdk"
 	@echo "  Install vcstool: pip install vcstool"
 	@echo ""
 	@echo "Quick Start:"

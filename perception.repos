@@ -1,0 +1,16 @@
+# Dependencies for ros2_android_perception
+# Fetched via vcstool: vcs import deps < perception.repos
+
+repositories:
+  ncnn:
+    type: git
+    url: https://github.com/Tencent/ncnn.git
+    version: master
+  eigen:
+    type: git
+    url: https://gitlab.com/libeigen/eigen.git
+    version: master
+  opencv-mobile:
+    type: git
+    url: https://github.com/nihui/opencv-mobile.git
+    version: master

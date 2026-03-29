@@ -43,7 +43,7 @@ NCNN_STAMP := $(DEPS_DIR)/.ncnn-built
 OPENCV_STAMP := $(DEPS_DIR)/.opencv-built
 LIB_STAMP := $(BUILD_DIR)/.lib-built
 
-.PHONY: all deps ncnn opencv lib install clean clean-deps test help
+.PHONY: all deps ncnn opencv lib install clean clean-deps help
 
 # ============================================================================
 # Main targets
@@ -135,19 +135,6 @@ install: $(LIB_STAMP)
 	@ls -lh $(INSTALL_DIR)/share/perception/models/ 2>/dev/null || true
 
 # ============================================================================
-# Testing
-# ============================================================================
-
-## Run unit tests
-test: lib
-	@echo "==> Running tests..."
-	@if [ -d "test" ] && [ -f "$(BUILD_DIR)/Makefile" ]; then \
-		cd $(BUILD_DIR) && ctest --output-on-failure; \
-	else \
-		echo "No tests configured"; \
-	fi
-
-# ============================================================================
 # Cleaning
 # ============================================================================
 
@@ -182,7 +169,6 @@ help:
 	@echo "  opencv       Setup OpenCV-mobile"
 	@echo "  lib          Build perception library"
 	@echo "  install      Install library to build/install"
-	@echo "  test         Run unit tests"
 	@echo "  clean        Clean build artifacts"
 	@echo "  clean-deps   Clean fetched dependencies"
 	@echo "  help         Show this help"

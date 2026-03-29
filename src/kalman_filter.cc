@@ -82,7 +82,7 @@ void KalmanFilter::Predict(Eigen::VectorXf& mean,
 void KalmanFilter::Project(const Eigen::VectorXf& mean,
                             const Eigen::MatrixXf& covariance,
                             Eigen::VectorXf& proj_mean,
-                            Eigen::MatrixXf& proj_cov) {
+                            Eigen::MatrixXf& proj_cov) const {
   // Measurement noise covariance R
   std::vector<float> std(4);
   std[0] = std_weight_position_ * mean(3);  // std_x
@@ -133,7 +133,7 @@ Eigen::VectorXf KalmanFilter::GatingDistance(
     const Eigen::VectorXf& mean,
     const Eigen::MatrixXf& covariance,
     const Eigen::MatrixXf& measurements,
-    bool only_position) {
+    bool only_position) const {
 
   // Project state to measurement space
   Eigen::VectorXf proj_mean;

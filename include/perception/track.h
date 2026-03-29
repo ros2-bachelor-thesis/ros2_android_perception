@@ -20,10 +20,15 @@ struct Track {
 
   /**
    * Kalman filter state vector (8D):
-   * [x, y, w, h, vx, vy, vw, vh]
-   * where (x,y) is center, (w,h) is size, v* are velocities
+   * [x, y, a, h, vx, vy, va, vh]
+   * where (x,y) is center, a is aspect ratio, h is height, v* are velocities
    */
   Eigen::VectorXf state;
+
+  /**
+   * Kalman filter covariance matrix (8x8)
+   */
+  Eigen::MatrixXf covariance;
 
   /**
    * Smoothed appearance feature (128-dim from mars-small128)
@@ -49,6 +54,7 @@ struct Track {
   Track()
       : track_id(-1),
         state(Eigen::VectorXf::Zero(8)),
+        covariance(Eigen::MatrixXf::Identity(8, 8)),
         time_since_update(0),
         hits(0),
         is_confirmed(false),
@@ -59,6 +65,7 @@ struct Track {
   Track(int id, const float* detection_bbox, int cls)
       : track_id(id),
         state(Eigen::VectorXf::Zero(8)),
+        covariance(Eigen::MatrixXf::Identity(8, 8)),
         time_since_update(0),
         hits(1),
         is_confirmed(false),

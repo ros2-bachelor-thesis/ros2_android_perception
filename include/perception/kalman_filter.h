@@ -85,7 +85,7 @@ class KalmanFilter {
   void Project(const Eigen::VectorXf& mean,
                const Eigen::MatrixXf& covariance,
                Eigen::VectorXf& proj_mean,
-               Eigen::MatrixXf& proj_cov);
+               Eigen::MatrixXf& proj_cov) const;
 
   /**
    * Compute Mahalanobis distance for gating
@@ -106,7 +106,7 @@ class KalmanFilter {
   Eigen::VectorXf GatingDistance(const Eigen::VectorXf& mean,
                                   const Eigen::MatrixXf& covariance,
                                   const Eigen::MatrixXf& measurements,
-                                  bool only_position = false);
+                                  bool only_position = false) const;
 
   /**
    * Chi-square thresholds for 95% confidence gating

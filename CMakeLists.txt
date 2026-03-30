@@ -20,18 +20,18 @@ find_package(ncnn REQUIRED)
 
 # Perception library (static for Android)
 add_library(${PROJECT_NAME} STATIC
-  src/image_preprocessor.cc
-  src/ncnn_detector.cc
-  src/ncnn_reid.cc
-  src/nms.cc
-  src/deep_sort_tracker.cc
-  src/kalman_filter.cc
-  src/linear_assignment.cc
-  src/object_detection_controller.cc
+  src/perception/image_preprocessor.cc
+  src/perception/ncnn_detector.cc
+  src/perception/ncnn_reid.cc
+  src/perception/nms.cc
+  src/perception/deep_sort_tracker.cc
+  src/perception/kalman_filter.cc
+  src/perception/linear_assignment.cc
+  src/perception/object_detection_controller.cc
 )
 
 target_include_directories(${PROJECT_NAME} PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/deps/ncnn/build-android/build/install/include>
   $<INSTALL_INTERFACE:include>
 )
@@ -50,8 +50,9 @@ install(TARGETS ${PROJECT_NAME}
   LIBRARY DESTINATION lib
 )
 
-install(DIRECTORY include/
-  DESTINATION include
+install(DIRECTORY src/perception/
+  DESTINATION include/perception
+  FILES_MATCHING PATTERN "*.h"
 )
 
 # Install models

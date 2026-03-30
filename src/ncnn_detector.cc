@@ -10,7 +10,8 @@ NcnnDetector::NcnnDetector(const std::string& param_path,
                            bool use_vulkan)
     : loaded_(false),
       use_vulkan_(use_vulkan),
-      input_size_(640),
+      input_width_(1280),
+      input_height_(736),
       num_classes_(3) {
   loaded_ = LoadModel(param_path, bin_path);
 }
@@ -53,11 +54,11 @@ std::vector<Detection> NcnnDetector::Detect(const cv::Mat& image,
   int img_height = image.rows;
 
   // Preprocess: letterbox resize + normalize
-  ncnn::Mat input = ImagePreprocessor::PrepareForYOLO(image, input_size_);
+  ncnn::Mat input = ImagePreprocessor::PrepareForYOLO(image, input_width_, input_height_);
 
   // Get letterbox parameters for coordinate mapping
   auto letterbox_params = ImagePreprocessor::GetLetterboxParams(
-      img_width, img_height, input_size_);
+      img_width, img_height, input_width_, input_height_);
 
   // Create NCNN extractor
   ncnn::Extractor ex = net_.create_extractor();
@@ -116,7 +117,7 @@ std::vector<Detection> NcnnDetector::ParseOutput(const ncnn::Mat& output,
   for (int i = 0; i < num_anchors; i++) {
     const float* row = output.row(i);
 
-    // Extract bbox center and size (in input image space, 640x640)
+    // Extract bbox center and size (in input image space, 1280x736)
     float cx = row[0];
     float cy = row[1];
     float w = row[2];
@@ -148,7 +149,7 @@ std::vector<Detection> NcnnDetector::ParseOutput(const ncnn::Mat& output,
     float x2 = cx + w / 2.0f;
     float y2 = cy + h / 2.0f;
 
-    // Map from letterbox space (640x640) back to original image space
+    // Map from letterbox space (1280x736) back to original image space
     // 1. Remove padding offset
     x1 = x1 - pad_w;
     y1 = y1 - pad_h;

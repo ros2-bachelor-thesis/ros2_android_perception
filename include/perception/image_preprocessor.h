@@ -17,12 +17,14 @@ class ImagePreprocessor {
    * Letterbox resize - maintain aspect ratio with padding
    *
    * @param image Input image (any size, BGR format)
-   * @param target_size Target square size (e.g., 640 for YOLOv9)
+   * @param target_width Target width (e.g., 1280 for YOLOv9)
+   * @param target_height Target height (e.g., 736 for YOLOv9)
    * @param pad_color Padding color (default: 114,114,114)
    * @return Resized image with padding
    */
   static cv::Mat LetterboxResize(const cv::Mat& image,
-                                  int target_size,
+                                  int target_width,
+                                  int target_height,
                                   const cv::Scalar& pad_color = cv::Scalar(114, 114, 114));
 
   /**
@@ -45,10 +47,13 @@ class ImagePreprocessor {
    * Full preprocessing pipeline for YOLOv9
    *
    * @param image Input image (any size, BGR uint8)
-   * @param input_size Model input size (default: 640)
+   * @param input_width Model input width (default: 1280)
+   * @param input_height Model input height (default: 736)
    * @return NCNN mat ready for YOLOv9 inference (CHW, normalized)
    */
-  static ncnn::Mat PrepareForYOLO(const cv::Mat& image, int input_size = 640);
+  static ncnn::Mat PrepareForYOLO(const cv::Mat& image,
+                                   int input_width = 1280,
+                                   int input_height = 736);
 
   /**
    * Preprocessing for mars-small128 ReID (crops detection bbox)
@@ -74,7 +79,8 @@ class ImagePreprocessor {
     int pad_h;        // Height padding (top)
   };
 
-  static LetterboxParams GetLetterboxParams(int src_width, int src_height, int target_size);
+  static LetterboxParams GetLetterboxParams(int src_width, int src_height,
+                                             int target_width, int target_height);
 };
 
 }  // namespace perception

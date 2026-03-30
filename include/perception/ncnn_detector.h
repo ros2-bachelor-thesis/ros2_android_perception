@@ -15,7 +15,7 @@ namespace perception {
  * Performs inference on NCNN-converted YOLOv9 model for 3-class
  * Colorado Potato Beetle detection (beetle, larva, eggs).
  *
- * Model input: 640x640 RGB (normalized to [0,1])
+ * Model input: 1280x736 RGB (normalized to [0,1])
  * Model output: [1, num_anchors, 5+num_classes] tensor
  * Post-processing: Confidence filtering + class-aware NMS
  */
@@ -38,7 +38,7 @@ class NcnnDetector {
    * Detect objects in image
    *
    * Pipeline:
-   * 1. Preprocess: letterbox resize to 640x640, normalize to [0,1]
+   * 1. Preprocess: letterbox resize to 1280x736, normalize to [0,1]
    * 2. NCNN inference: YOLOv9 forward pass
    * 3. Decode output: parse bounding boxes + class scores
    * 4. Filter: confidence threshold
@@ -59,9 +59,10 @@ class NcnnDetector {
   bool IsLoaded() const { return loaded_; }
 
   /**
-   * Get model input size (should be 640 for yolov9_s_pobed)
+   * Get model input dimensions (1280x736 for yolov9_s_pobed)
    */
-  int GetInputSize() const { return input_size_; }
+  int GetInputWidth() const { return input_width_; }
+  int GetInputHeight() const { return input_height_; }
 
  private:
   /**
@@ -99,7 +100,8 @@ class NcnnDetector {
   ncnn::Net net_;           ///< NCNN inference network
   bool loaded_;             ///< Model load status
   bool use_vulkan_;         ///< Vulkan GPU acceleration flag
-  int input_size_;          ///< Model input size (640 for YOLOv9-s)
+  int input_width_;         ///< Model input width (1280 for YOLOv9-s)
+  int input_height_;        ///< Model input height (736 for YOLOv9-s)
   int num_classes_;         ///< Number of classes (3: beetle, larva, eggs)
 
   // Layer names (may need adjustment based on actual .param file)

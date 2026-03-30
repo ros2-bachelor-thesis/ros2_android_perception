@@ -4,30 +4,31 @@
 namespace perception {
 
 ImagePreprocessor::LetterboxParams ImagePreprocessor::GetLetterboxParams(
-    int src_width, int src_height, int target_size) {
+    int src_width, int src_height, int target_width, int target_height) {
   LetterboxParams params;
 
-  // Calculate scale to fit within target size while maintaining aspect ratio
-  float scale_w = static_cast<float>(target_size) / src_width;
-  float scale_h = static_cast<float>(target_size) / src_height;
+  // Calculate scale to fit within target dimensions while maintaining aspect ratio
+  float scale_w = static_cast<float>(target_width) / src_width;
+  float scale_h = static_cast<float>(target_height) / src_height;
   params.scale = std::min(scale_w, scale_h);
 
-  // Calculate new dimensions
+  // Calculate new dimensions after scaling
   int new_width = static_cast<int>(src_width * params.scale);
   int new_height = static_cast<int>(src_height * params.scale);
 
   // Calculate padding to center the image
-  params.pad_w = (target_size - new_width) / 2;
-  params.pad_h = (target_size - new_height) / 2;
+  params.pad_w = (target_width - new_width) / 2;
+  params.pad_h = (target_height - new_height) / 2;
 
   return params;
 }
 
 cv::Mat ImagePreprocessor::LetterboxResize(const cv::Mat& image,
-                                            int target_size,
+                                            int target_width,
+                                            int target_height,
                                             const cv::Scalar& pad_color) {
   // Calculate resize parameters
-  auto params = GetLetterboxParams(image.cols, image.rows, target_size);
+  auto params = GetLetterboxParams(image.cols, image.rows, target_width, target_height);
 
   // Resize image maintaining aspect ratio
   int new_width = static_cast<int>(image.cols * params.scale);
@@ -35,8 +36,8 @@ cv::Mat ImagePreprocessor::LetterboxResize(const cv::Mat& image,
   cv::Mat resized;
   cv::resize(image, resized, cv::Size(new_width, new_height), 0, 0, cv::INTER_LINEAR);
 
-  // Create canvas with padding
-  cv::Mat canvas(target_size, target_size, image.type(), pad_color);
+  // Create canvas with padding (target dimensions)
+  cv::Mat canvas(target_height, target_width, image.type(), pad_color);
 
   // Copy resized image to center of canvas
   cv::Rect roi(params.pad_w, params.pad_h, new_width, new_height);
@@ -81,9 +82,11 @@ ncnn::Mat ImagePreprocessor::ToNCNN(const cv::Mat& image) {
   return ncnn_mat;
 }
 
-ncnn::Mat ImagePreprocessor::PrepareForYOLO(const cv::Mat& image, int input_size) {
-  // Step 1: Letterbox resize to square input
-  cv::Mat resized = LetterboxResize(image, input_size);
+ncnn::Mat ImagePreprocessor::PrepareForYOLO(const cv::Mat& image,
+                                             int input_width,
+                                             int input_height) {
+  // Step 1: Letterbox resize to target dimensions
+  cv::Mat resized = LetterboxResize(image, input_width, input_height);
 
   // Step 2: Normalize and convert BGR to RGB
   cv::Mat normalized = NormalizeAndConvertRGB(resized);

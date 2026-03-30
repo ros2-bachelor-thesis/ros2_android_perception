@@ -2,13 +2,16 @@
 
 Object detection and tracking library for ROS 2 on Android using NCNN inference framework.
 
+> [!NOTE]
+> This is an optional package for ros2_android. Build only if you need object detection capabilities.
+
 ## Features
 
 - **YOLOv9 Object Detection**: 3-class detector for Colorado Potato Beetle detection (beetle, larva, eggs)
 - **Deep SORT Tracking**: Multi-object tracking with appearance-based re-identification
 - **NCNN Inference**: Optimized for ARM NEON with optional Vulkan GPU acceleration
-- **ROS 2 Integration**: Subscribes to camera topics, publishes detection results
-- **3D Localization**: Extracts 3D object centers from depth + point cloud data
+- **ROS 2 Integration**: ObjectDetectionController provides node interface for detection pipeline
+- **Android Native**: Pure C++ implementation, integrates via JNI with ros2_android
 
 ## Build Requirements
 
@@ -20,8 +23,8 @@ Object detection and tracking library for ROS 2 on Android using NCNN inference 
 ## Quick Start
 
 ```bash
-# Set Android NDK path
-export ANDROID_NDK=~/Android/Sdk/ndk/25.1.8937393
+# Set Android SDK path (NDK will be auto-detected)
+export ANDROID_HOME=~/Android/Sdk
 
 # Fetch dependencies (NCNN, Eigen, OpenCV-mobile)
 make deps
@@ -29,8 +32,12 @@ make deps
 # Build NCNN for Android
 make ncnn
 
-# Build perception library
+# Build perception library (default: RelWithDebInfo)
 make all
+
+# Or build with specific type
+make debug    # Full debug symbols, no optimization
+make release  # Optimized, stripped symbols
 
 # Install to build/install
 make install

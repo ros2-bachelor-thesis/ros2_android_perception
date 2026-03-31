@@ -13,8 +13,10 @@ include(ExternalProject)
 # ============================================================================
 
 set(DEPS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps")
-set(OPENCV_DIR "${DEPS_DIR}/opencv-mobile-4.13.0-android")
-set(OPENCV_CHECK_FILE "${OPENCV_DIR}/sdk/native/3rdparty/libs/arm64-v8a/libkleidicv.a")
+set(OPENCV_VERSION "4.10.0")
+set(OPENCV_RELEASE_TAG "v29")  # opencv-mobile release tag for 4.10.0
+set(OPENCV_DIR "${DEPS_DIR}/opencv-mobile-${OPENCV_VERSION}-android")
+set(OPENCV_CHECK_FILE "${OPENCV_DIR}/sdk/native/staticlibs/arm64-v8a/libopencv_core.a")
 set(NCNN_DIR "${DEPS_DIR}/ncnn/build-android")
 set(NCNN_CHECK_FILE "${NCNN_DIR}/install/lib/libncnn.a")
 
@@ -22,7 +24,7 @@ set(NCNN_CHECK_FILE "${NCNN_DIR}/install/lib/libncnn.a")
 if(NOT EXISTS "${OPENCV_CHECK_FILE}")
   message(STATUS "opencv-mobile not found, downloading...")
   file(DOWNLOAD
-    "https://github.com/nihui/opencv-mobile/releases/download/v4.13.0/opencv-mobile-4.13.0-android.zip"
+    "https://github.com/nihui/opencv-mobile/releases/download/${OPENCV_RELEASE_TAG}/opencv-mobile-${OPENCV_VERSION}-android.zip"
     "${DEPS_DIR}/opencv-mobile-android.zip"
     SHOW_PROGRESS
     STATUS DOWNLOAD_STATUS
@@ -101,8 +103,22 @@ endif()
 # Find dependencies (now guaranteed to exist)
 # ============================================================================
 
-set(OpenCV_DIR "${OPENCV_DIR}/sdk/native/jni")
-find_package(OpenCV REQUIRED COMPONENTS core imgproc)
+# OpenCV-mobile (prebuilt binary - manually create targets)
+set(OPENCV_INCLUDE_DIR "${OPENCV_DIR}/sdk/native/jni/include")
+set(OPENCV_LIB_DIR "${OPENCV_DIR}/sdk/native/staticlibs/${ANDROID_ABI}")
+
+add_library(opencv_core STATIC IMPORTED)
+set_target_properties(opencv_core PROPERTIES
+  IMPORTED_LOCATION "${OPENCV_LIB_DIR}/libopencv_core.a"
+  INTERFACE_INCLUDE_DIRECTORIES "${OPENCV_INCLUDE_DIR}"
+)
+
+add_library(opencv_imgproc STATIC IMPORTED)
+set_target_properties(opencv_imgproc PROPERTIES
+  IMPORTED_LOCATION "${OPENCV_LIB_DIR}/libopencv_imgproc.a"
+  INTERFACE_INCLUDE_DIRECTORIES "${OPENCV_INCLUDE_DIR}"
+  INTERFACE_LINK_LIBRARIES opencv_core
+)
 
 # Eigen3 (header-only library)
 set(EIGEN3_INCLUDE_DIR "${DEPS_DIR}/eigen")
@@ -111,11 +127,12 @@ set_target_properties(Eigen3::Eigen PROPERTIES
   INTERFACE_INCLUDE_DIRECTORIES "${EIGEN3_INCLUDE_DIR}"
 )
 
+# NCNN (provides CMake config)
 set(ncnn_DIR "${NCNN_DIR}/install/lib/cmake/ncnn")
 find_package(ncnn REQUIRED)
 
-# Perception library (static for Android)
-add_library(${PROJECT_NAME} STATIC
+# Perception library (shared - bundles NCNN, OpenCV, glslang internally)
+add_library(${PROJECT_NAME} SHARED
   src/perception/image_preprocessor.cc
   src/perception/ncnn_detector.cc
   src/perception/ncnn_reid.cc
@@ -126,6 +143,13 @@ add_library(${PROJECT_NAME} STATIC
   src/perception/object_detection_controller.cc
 )
 
+# Enable OpenMP support
+find_package(OpenMP REQUIRED)
+if(OpenMP_CXX_FOUND)
+  target_compile_options(${PROJECT_NAME} PRIVATE -fopenmp)
+  target_link_options(${PROJECT_NAME} PRIVATE -fopenmp)
+endif()
+
 target_include_directories(${PROJECT_NAME} PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
   $<BUILD_INTERFACE:${NCNN_DIR}/install/include>
@@ -134,8 +158,8 @@ target_include_directories(${PROJECT_NAME} PUBLIC
 
 target_link_libraries(${PROJECT_NAME} PUBLIC
   ncnn
-  opencv_core
   opencv_imgproc
+  opencv_core
   Eigen3::Eigen
 )
 

@@ -99,10 +99,10 @@ opencv: $(OPENCV_STAMP)
 $(OPENCV_STAMP): $(DEPS_STAMP)
 	@echo "==> Setting up OpenCV-mobile..."
 	@mkdir -p $(DEPS_DIR)
-	@if [ ! -f "$(DEPS_DIR)/opencv-mobile-4.13.0-android/sdk/native/3rdparty/libs/arm64-v8a/libkleidicv.a" ]; then \
-		echo "==> Downloading opencv-mobile 4.13.0 for Android..."; \
+	@if [ ! -f "$(DEPS_DIR)/opencv-mobile-4.10.0-android/sdk/native/staticlibs/arm64-v8a/libopencv_core.a" ]; then \
+		echo "==> Downloading opencv-mobile 4.10.0 for Android..."; \
 		curl -L -o $(DEPS_DIR)/opencv-mobile-android.zip \
-			https://github.com/nihui/opencv-mobile/releases/latest/download/opencv-mobile-4.13.0-android.zip; \
+			https://github.com/nihui/opencv-mobile/releases/download/v29/opencv-mobile-4.10.0-android.zip; \
 		echo "==> Extracting opencv-mobile..."; \
 		unzip -q $(DEPS_DIR)/opencv-mobile-android.zip -d $(DEPS_DIR)/; \
 		rm $(DEPS_DIR)/opencv-mobile-android.zip; \
@@ -121,10 +121,11 @@ $(LIB_STAMP): $(NCNN_STAMP) $(OPENCV_STAMP) CMakeLists.txt $(LIB_SOURCES)
 	@echo "==> Building perception library..."
 	@mkdir -p $(BUILD_DIR)
 	cd $(BUILD_DIR) && cmake .. $(CMAKE_ARGS) \
-		-Dncnn_DIR=$(CURDIR)/$(DEPS_DIR)/ncnn/build-android/build/install/lib/cmake/ncnn
+		-Dncnn_DIR=$(CURDIR)/$(DEPS_DIR)/ncnn/build-android/build/install/lib/cmake/ncnn \
+		-DOpenCV_DIR=$(CURDIR)/$(DEPS_DIR)/opencv-mobile-4.10.0-android/sdk/native/jni
 	cd $(BUILD_DIR) && $(MAKE) -j$(NPROC)
 	@touch $(LIB_STAMP)
-	@echo "==> Library built: $(BUILD_DIR)/libros2_android_perception.a"
+	@echo "==> Library built: $(BUILD_DIR)/libros2_android_perception.so"
 
 ## Install library to build/install
 install: $(LIB_STAMP)

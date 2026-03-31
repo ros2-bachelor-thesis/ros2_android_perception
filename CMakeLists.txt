@@ -5,17 +5,113 @@ project(ros2_android_perception VERSION 0.1.0)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Dependencies
-set(OpenCV_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/opencv-mobile-4.13.0-android/sdk/native/jni")
+# Include ExternalProject for dependency building
+include(ExternalProject)
+
+# ============================================================================
+# Auto-build dependencies if not present
+# ============================================================================
+
+set(DEPS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps")
+set(OPENCV_DIR "${DEPS_DIR}/opencv-mobile-4.13.0-android")
+set(OPENCV_CHECK_FILE "${OPENCV_DIR}/sdk/native/3rdparty/libs/arm64-v8a/libkleidicv.a")
+set(NCNN_DIR "${DEPS_DIR}/ncnn/build-android")
+set(NCNN_CHECK_FILE "${NCNN_DIR}/install/lib/libncnn.a")
+
+# Download opencv-mobile prebuilt binary if not present
+if(NOT EXISTS "${OPENCV_CHECK_FILE}")
+  message(STATUS "opencv-mobile not found, downloading...")
+  file(DOWNLOAD
+    "https://github.com/nihui/opencv-mobile/releases/download/v4.13.0/opencv-mobile-4.13.0-android.zip"
+    "${DEPS_DIR}/opencv-mobile-android.zip"
+    SHOW_PROGRESS
+    STATUS DOWNLOAD_STATUS
+  )
+  list(GET DOWNLOAD_STATUS 0 STATUS_CODE)
+  if(NOT STATUS_CODE EQUAL 0)
+    message(FATAL_ERROR "Failed to download opencv-mobile")
+  endif()
+
+  message(STATUS "Extracting opencv-mobile...")
+  execute_process(
+    COMMAND ${CMAKE_COMMAND} -E tar xzf "${DEPS_DIR}/opencv-mobile-android.zip"
+    WORKING_DIRECTORY "${DEPS_DIR}"
+    RESULT_VARIABLE EXTRACT_RESULT
+  )
+  if(NOT EXTRACT_RESULT EQUAL 0)
+    message(FATAL_ERROR "Failed to extract opencv-mobile")
+  endif()
+
+  file(REMOVE "${DEPS_DIR}/opencv-mobile-android.zip")
+  message(STATUS "opencv-mobile download complete")
+endif()
+
+# Build NCNN if not present
+if(NOT EXISTS "${NCNN_CHECK_FILE}")
+  message(STATUS "NCNN not built, building...")
+
+  # Initialize NCNN submodules
+  execute_process(
+    COMMAND git submodule update --init --recursive
+    WORKING_DIRECTORY "${DEPS_DIR}/ncnn"
+    RESULT_VARIABLE SUBMODULE_RESULT
+  )
+  if(NOT SUBMODULE_RESULT EQUAL 0)
+    message(WARNING "Failed to initialize NCNN submodules, trying to continue...")
+  endif()
+
+  # Configure NCNN
+  file(MAKE_DIRECTORY "${NCNN_DIR}")
+  execute_process(
+    COMMAND ${CMAKE_COMMAND}
+      -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
+      -DANDROID_ABI=${ANDROID_ABI}
+      -DANDROID_PLATFORM=${ANDROID_PLATFORM}
+      -DCMAKE_BUILD_TYPE=Release
+      -DNCNN_VULKAN=ON
+      -DNCNN_BUILD_TOOLS=OFF
+      -DNCNN_BUILD_BENCHMARK=OFF
+      -DNCNN_BUILD_EXAMPLES=OFF
+      -DNCNN_SHARED_LIB=OFF
+      -DCMAKE_INSTALL_PREFIX=${NCNN_DIR}/install
+      ..
+    WORKING_DIRECTORY "${NCNN_DIR}"
+    RESULT_VARIABLE CONFIGURE_RESULT
+  )
+  if(NOT CONFIGURE_RESULT EQUAL 0)
+    message(FATAL_ERROR "Failed to configure NCNN")
+  endif()
+
+  # Build NCNN
+  include(ProcessorCount)
+  ProcessorCount(N)
+  execute_process(
+    COMMAND ${CMAKE_COMMAND} --build . --parallel ${N} --target install
+    WORKING_DIRECTORY "${NCNN_DIR}"
+    RESULT_VARIABLE BUILD_RESULT
+  )
+  if(NOT BUILD_RESULT EQUAL 0)
+    message(FATAL_ERROR "Failed to build NCNN")
+  endif()
+
+  message(STATUS "NCNN build complete")
+endif()
+
+# ============================================================================
+# Find dependencies (now guaranteed to exist)
+# ============================================================================
+
+set(OpenCV_DIR "${OPENCV_DIR}/sdk/native/jni")
 find_package(OpenCV REQUIRED COMPONENTS core imgproc)
 
 # Eigen3 (header-only library)
-set(EIGEN3_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/eigen")
+set(EIGEN3_INCLUDE_DIR "${DEPS_DIR}/eigen")
 add_library(Eigen3::Eigen INTERFACE IMPORTED)
 set_target_properties(Eigen3::Eigen PROPERTIES
   INTERFACE_INCLUDE_DIRECTORIES "${EIGEN3_INCLUDE_DIR}"
 )
 
+set(ncnn_DIR "${NCNN_DIR}/install/lib/cmake/ncnn")
 find_package(ncnn REQUIRED)
 
 # Perception library (static for Android)
@@ -32,7 +128,7 @@ add_library(${PROJECT_NAME} STATIC
 
 target_include_directories(${PROJECT_NAME} PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/deps/ncnn/build-android/build/install/include>
+  $<BUILD_INTERFACE:${NCNN_DIR}/install/include>
   $<INSTALL_INTERFACE:include>
 )
 

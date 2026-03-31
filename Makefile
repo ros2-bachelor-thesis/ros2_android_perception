@@ -52,8 +52,8 @@ LIB_STAMP := $(BUILD_DIR)/.lib-built
 ## Build perception library (default)
 all: lib
 
-## Fetch dependencies via vcstool
-deps: $(DEPS_STAMP)
+## Fetch dependencies via vcstool and download opencv-mobile binary
+deps: $(DEPS_STAMP) $(OPENCV_STAMP)
 
 $(DEPS_STAMP): perception.repos
 	@echo "==> Initializing git submodules..."
@@ -99,7 +99,7 @@ opencv: $(OPENCV_STAMP)
 $(OPENCV_STAMP): $(DEPS_STAMP)
 	@echo "==> Setting up OpenCV-mobile..."
 	@mkdir -p $(DEPS_DIR)
-	@if [ ! -d "$(DEPS_DIR)/opencv-mobile-4.13.0-android/sdk" ]; then \
+	@if [ ! -f "$(DEPS_DIR)/opencv-mobile-4.13.0-android/sdk/native/3rdparty/libs/arm64-v8a/libkleidicv.a" ]; then \
 		echo "==> Downloading opencv-mobile 4.13.0 for Android..."; \
 		curl -L -o $(DEPS_DIR)/opencv-mobile-android.zip \
 			https://github.com/nihui/opencv-mobile/releases/latest/download/opencv-mobile-4.13.0-android.zip; \
@@ -107,7 +107,7 @@ $(OPENCV_STAMP): $(DEPS_STAMP)
 		unzip -q $(DEPS_DIR)/opencv-mobile-android.zip -d $(DEPS_DIR)/; \
 		rm $(DEPS_DIR)/opencv-mobile-android.zip; \
 	else \
-		echo "Using opencv-mobile prebuilt"; \
+		echo "Using existing opencv-mobile prebuilt"; \
 	fi
 	@touch $(OPENCV_STAMP)
 	@echo "==> OpenCV setup complete"

@@ -5,9 +5,7 @@ build/
 *.o
 
 # Dependencies (managed by vcstool and downloads)
-deps/ncnn/
-deps/eigen/
-deps/opencv-mobile-4.13.0-android/
+deps
 
 # IDE files
 .vscode/

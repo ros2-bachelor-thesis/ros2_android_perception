@@ -5,8 +5,8 @@ repositories:
   ncnn:
     type: git
     url: https://github.com/Tencent/ncnn.git
-    version: master
+    version: 20250916
   eigen:
     type: git
     url: https://gitlab.com/libeigen/eigen.git
-    version: master
+    version: 3.4.1

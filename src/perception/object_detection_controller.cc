@@ -1,5 +1,10 @@
 #include "perception/object_detection_controller.h"
 
+#include <opencv2/opencv.hpp>
+
+#include "perception/ncnn_detector.h"
+#include "perception/deep_sort_tracker.h"
+
 namespace perception {
 
 ObjectDetectionController::ObjectDetectionController(
@@ -44,36 +49,6 @@ ObjectDetectionController::~ObjectDetectionController() {
 }
 
 std::vector<Track> ObjectDetectionController::ProcessFrame(
-    const cv::Mat& image,
-    float conf_threshold,
-    float iou_threshold) {
-
-  if (!ready_ || image.empty()) {
-    return {};
-  }
-
-  // Step 1: Run YOLOv9 detector
-  // - Preprocesses image (letterbox resize to 1280x736, normalize)
-  // - NCNN inference
-  // - Decodes output (bbox, confidence, class)
-  // - Applies NMS
-  auto detections = detector_->Detect(image, conf_threshold, iou_threshold);
-
-  // Step 2: Update Deep SORT tracker
-  // - Extracts ReID features for each detection
-  // - Kalman filter prediction
-  // - Cascade matching (appearance + motion)
-  // - IoU matching for unmatched
-  // - Updates confirmed tracks, creates new tentative tracks
-  auto all_tracks = tracker_->Update(image, detections);
-
-  // Step 3: Get only confirmed tracks (hits >= 3)
-  last_confirmed_tracks_ = tracker_->GetConfirmedTracks();
-
-  return last_confirmed_tracks_;
-}
-
-std::vector<Track> ObjectDetectionController::ProcessFrame(
     const uint8_t* rgb_data,
     int width,
     int height,
@@ -84,7 +59,7 @@ std::vector<Track> ObjectDetectionController::ProcessFrame(
     return {};
   }
 
-  // Convert RGB to BGR cv::Mat (OpenCV expects BGR)
+  // Convert RGB to BGR cv::Mat (OpenCV expects BGR internally)
   cv::Mat bgr_image(height, width, CV_8UC3);
   for (int i = 0; i < width * height; ++i) {
     bgr_image.data[i * 3 + 0] = rgb_data[i * 3 + 2];  // B
@@ -92,8 +67,25 @@ std::vector<Track> ObjectDetectionController::ProcessFrame(
     bgr_image.data[i * 3 + 2] = rgb_data[i * 3 + 0];  // R
   }
 
-  // Delegate to cv::Mat overload
-  return ProcessFrame(bgr_image, conf_threshold, iou_threshold);
+  // Step 1: Run YOLOv9 detector
+  // - Preprocesses image (letterbox resize to 1280x736, normalize)
+  // - NCNN inference
+  // - Decodes output (bbox, confidence, class)
+  // - Applies NMS
+  auto detections = detector_->Detect(bgr_image, conf_threshold, iou_threshold);
+
+  // Step 2: Update Deep SORT tracker
+  // - Extracts ReID features for each detection
+  // - Kalman filter prediction
+  // - Cascade matching (appearance + motion)
+  // - IoU matching for unmatched
+  // - Updates confirmed tracks, creates new tentative tracks
+  auto all_tracks = tracker_->Update(bgr_image, detections);
+
+  // Step 3: Get only confirmed tracks (hits >= 3)
+  last_confirmed_tracks_ = tracker_->GetConfirmedTracks();
+
+  return last_confirmed_tracks_;
 }
 
 size_t ObjectDetectionController::GetTrackCount() const {

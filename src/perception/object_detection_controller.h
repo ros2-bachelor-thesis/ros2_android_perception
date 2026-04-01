@@ -1,17 +1,18 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
 
-#include <opencv2/opencv.hpp>
-
 #include "perception/detection.h"
 #include "perception/track.h"
-#include "perception/ncnn_detector.h"
-#include "perception/deep_sort_tracker.h"
 
 namespace perception {
+
+// Forward declarations of internal components
+class NcnnDetector;
+class DeepSortTracker;
 
 /**
  * Complete YOLOv9 + Deep SORT object detection and tracking pipeline
@@ -50,25 +51,13 @@ class ObjectDetectionController {
    * Process single frame - complete detection + tracking pipeline
    *
    * Pipeline:
-   * 1. Preprocess image (letterbox resize, normalize)
-   * 2. YOLOv9 detection
-   * 3. NMS filtering
-   * 4. Extract ReID features
-   * 5. Deep SORT tracking (Kalman + Hungarian matching)
-   * 6. Return confirmed tracks only (hits >= n_init)
-   *
-   * @param image Input image (BGR, any size - will be resized to 1280x736)
-   * @param conf_threshold Confidence threshold (default: 0.25)
-   * @param iou_threshold NMS IoU threshold (default: 0.45)
-   * @return Vector of confirmed tracks (sorted by track_id)
-   */
-  std::vector<Track> ProcessFrame(
-      const cv::Mat& image,
-      float conf_threshold = 0.25f,
-      float iou_threshold = 0.45f);
-
-  /**
-   * Process single frame from raw RGB buffer (overload for non-OpenCV clients)
+   * 1. Convert RGB to BGR
+   * 2. Preprocess image (letterbox resize to 1280x736, normalize)
+   * 3. YOLOv9 detection
+   * 4. NMS filtering
+   * 5. Extract ReID features
+   * 6. Deep SORT tracking (Kalman + Hungarian matching)
+   * 7. Return confirmed tracks only (hits >= n_init)
    *
    * @param rgb_data Raw RGB buffer (interleaved RGB, 8-bit per channel)
    * @param width Image width in pixels

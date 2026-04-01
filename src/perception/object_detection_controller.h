@@ -68,6 +68,23 @@ class ObjectDetectionController {
       float iou_threshold = 0.45f);
 
   /**
+   * Process single frame from raw RGB buffer (overload for non-OpenCV clients)
+   *
+   * @param rgb_data Raw RGB buffer (interleaved RGB, 8-bit per channel)
+   * @param width Image width in pixels
+   * @param height Image height in pixels
+   * @param conf_threshold Confidence threshold (default: 0.25)
+   * @param iou_threshold NMS IoU threshold (default: 0.45)
+   * @return Vector of confirmed tracks (sorted by track_id)
+   */
+  std::vector<Track> ProcessFrame(
+      const uint8_t* rgb_data,
+      int width,
+      int height,
+      float conf_threshold = 0.25f,
+      float iou_threshold = 0.45f);
+
+  /**
    * Check if models loaded successfully
    */
   bool IsReady() const { return ready_; }

@@ -73,6 +73,29 @@ std::vector<Track> ObjectDetectionController::ProcessFrame(
   return last_confirmed_tracks_;
 }
 
+std::vector<Track> ObjectDetectionController::ProcessFrame(
+    const uint8_t* rgb_data,
+    int width,
+    int height,
+    float conf_threshold,
+    float iou_threshold) {
+
+  if (!ready_ || !rgb_data || width <= 0 || height <= 0) {
+    return {};
+  }
+
+  // Convert RGB to BGR cv::Mat (OpenCV expects BGR)
+  cv::Mat bgr_image(height, width, CV_8UC3);
+  for (int i = 0; i < width * height; ++i) {
+    bgr_image.data[i * 3 + 0] = rgb_data[i * 3 + 2];  // B
+    bgr_image.data[i * 3 + 1] = rgb_data[i * 3 + 1];  // G
+    bgr_image.data[i * 3 + 2] = rgb_data[i * 3 + 0];  // R
+  }
+
+  // Delegate to cv::Mat overload
+  return ProcessFrame(bgr_image, conf_threshold, iou_threshold);
+}
+
 size_t ObjectDetectionController::GetTrackCount() const {
   return tracker_ ? tracker_->GetTrackCount() : 0;
 }

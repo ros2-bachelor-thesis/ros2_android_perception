@@ -81,9 +81,9 @@ class NcnnReID {
   int input_height_;        ///< ReID input height (128 for mars-small128)
   int feature_dim_;         ///< Output feature dimension (128)
 
-  // Layer names (may need adjustment based on actual .param file)
-  const char* input_layer_ = "input.1";
-  const char* output_layer_ = "481";  // mars-small128 output layer name
+  // Layer names from NCNN conversion (tf2onnx → onnx2ncnn)
+  const char* input_layer_ = "images:0";
+  const char* output_layer_ = "features:0";
 };
 
 }  // namespace perception

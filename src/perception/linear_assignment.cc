@@ -130,9 +130,10 @@ MatchResult LinearAssignment::MatchingCascade(
     }
 
     // Find tracks at this cascade level
+    // Python uses: time_since_update == 1 + level (level 0 = tracks updated last frame)
     std::vector<int> level_track_indices;
     for (int idx : track_indices) {
-      if (tracks[idx].time_since_update == level) {
+      if (tracks[idx].time_since_update == level + 1) {
         level_track_indices.push_back(idx);
       }
     }
@@ -255,6 +256,12 @@ Eigen::MatrixXf LinearAssignment::IoUCostMatrix(
     for (int j = 0; j < num_detections; j++) {
       const Track& track = tracks[track_indices[i]];
       const Detection& det = detections[detection_indices[j]];
+
+      // Python: Only IoU-match tracks updated within last frame (time_since_update <= 1)
+      if (track.time_since_update > 1) {
+        cost_matrix(i, j) = INFTY_COST;
+        continue;
+      }
 
       float iou = CalculateIoU(track.bbox, det.bbox);
       cost_matrix(i, j) = 1.0f - iou;  // Cost = 1 - IoU

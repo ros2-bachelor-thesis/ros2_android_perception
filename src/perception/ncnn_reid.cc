@@ -1,5 +1,6 @@
 #include "perception/ncnn_reid.h"
 #include "perception/image_preprocessor.h"
+#include "perception/ncnn_shape_layer.h"
 #include <cmath>
 #include <ncnn/net.h>
 
@@ -19,6 +20,9 @@ NcnnReID::~NcnnReID() {
 
 bool NcnnReID::LoadModel(const std::string& param_path,
                           const std::string& bin_path) {
+  // Register custom Shape layer (required for mars-small128 BatchNorm/Reshape)
+  net_.register_custom_layer("Shape", Shape_layer_creator);
+
   // Configure NCNN options (no Vulkan - small model, CPU sufficient)
   ncnn::Option opt;
   opt.lightmode = true;

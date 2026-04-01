@@ -137,6 +137,7 @@ add_library(${PROJECT_NAME} SHARED
   src/perception/image_preprocessor.cc
   src/perception/ncnn_detector.cc
   src/perception/ncnn_reid.cc
+  src/perception/ncnn_shape_layer.cc
   src/perception/nms.cc
   src/perception/deep_sort_tracker.cc
   src/perception/kalman_filter.cc

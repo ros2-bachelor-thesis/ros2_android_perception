@@ -27,6 +27,17 @@ std::vector<Track> DeepSortTracker::Update(
     return tracks_;
   }
 
+  // Python behavior: If no detections, run predict-only cycle
+  if (detections.empty()) {
+    Predict();
+    // Mark all tracks as missed (time_since_update++)
+    for (size_t i = 0; i < tracks_.size(); i++) {
+      MarkMissed(i);
+    }
+    DeleteOldTracks();
+    return tracks_;
+  }
+
   // Step 1: Predict all track states
   Predict();
 
@@ -308,7 +319,8 @@ float DeepSortTracker::MinCosineDistanceToGallery(
 std::vector<Track> DeepSortTracker::GetConfirmedTracks() const {
   std::vector<Track> confirmed;
   for (const auto& track : tracks_) {
-    if (track.is_confirmed) {
+    // Python: Only return confirmed tracks updated within last frame
+    if (track.is_confirmed && track.time_since_update <= 1) {
       confirmed.push_back(track);
     }
   }

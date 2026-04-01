@@ -18,7 +18,12 @@ namespace perception {
  */
 struct DeepSortConfig {
   float max_cosine_distance = 0.4f;  ///< Max cosine distance for appearance matching
-  int nn_budget = 100;                ///< Max features stored per track (gallery size)
+
+  /// Max features stored per track (gallery size)
+  /// Python reference uses unlimited (nn_budget=None), C++ uses 100 for Android memory constraints.
+  /// Trade-off: Lower value reduces memory but may degrade re-identification after long occlusions.
+  int nn_budget = 100;
+
   int max_age = 30;                   ///< Max frames before deleting lost track
   int n_init = 3;                     ///< Min consecutive hits to confirm track
   float max_iou_distance = 0.7f;      ///< Max IoU distance for fallback matching

@@ -205,9 +205,9 @@ void LinearAssignment::GateCostMatrix(
   for (size_t i = 0; i < track_indices.size(); i++) {
     const Track& track = tracks[track_indices[i]];
 
-    // Compute gating distances for all detections
+    // Compute gating distances for all detections using track's covariance
     Eigen::VectorXf distances = kf.GatingDistance(
-        track.state, Eigen::MatrixXf::Identity(8, 8), measurements, false);
+        track.state, track.covariance, measurements, false);
 
     // Set cost to infinity for gates that exceed threshold
     for (int j = 0; j < num_detections; j++) {

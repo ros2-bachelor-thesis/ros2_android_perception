@@ -80,10 +80,11 @@ struct Track {
     float cy = (detection_bbox[1] + detection_bbox[3]) / 2.0f;
     float w = detection_bbox[2] - detection_bbox[0];
     float h = detection_bbox[3] - detection_bbox[1];
+    float a = w / h;  // aspect ratio
 
     state(0) = cx;  // x
     state(1) = cy;  // y
-    state(2) = w;   // width
+    state(2) = a;   // aspect ratio (not width!)
     state(3) = h;   // height
     // velocities initialized to zero (indices 4-7)
   }
@@ -102,8 +103,9 @@ struct Track {
   void UpdateBboxFromState() {
     float cx = state(0);
     float cy = state(1);
-    float w = state(2);
+    float a = state(2);  // aspect ratio
     float h = state(3);
+    float w = a * h;     // compute width from aspect ratio and height
 
     bbox[0] = cx - w / 2.0f;  // x1
     bbox[1] = cy - h / 2.0f;  // y1

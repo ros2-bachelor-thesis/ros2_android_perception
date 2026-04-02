@@ -134,16 +134,24 @@ find_package(ncnn REQUIRED)
 
 # Perception library (shared - bundles NCNN, OpenCV, glslang internally)
 add_library(${PROJECT_NAME} SHARED
-  src/perception/image_preprocessor.cc
-  src/perception/ncnn_detector.cc
-  src/perception/ncnn_reid.cc
-  src/perception/ncnn_shape_layer.cc
-  src/perception/nms.cc
-  src/perception/deep_sort_tracker.cc
-  src/perception/kalman_filter.cc
-  src/perception/linear_assignment.cc
-  src/perception/object_detection_controller.cc
+  src/image_preprocessor.cc
+  src/ncnn_detector.cc
+  src/ncnn_reid.cc
+  src/nms.cc
+  src/deep_sort_tracker.cc
+  src/kalman_filter.cc
+  src/linear_assignment.cc
+  src/object_detection_controller.cc
 )
+
+# Define ROS2_ANDROID_DEBUG for Debug/RelWithDebInfo builds
+# This controls LOGD() macro availability (matches ros2_android/src/core/log.h)
+if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+  target_compile_definitions(${PROJECT_NAME} PRIVATE ROS2_ANDROID_DEBUG=1)
+  message(STATUS "ROS2_ANDROID_DEBUG enabled (BUILD_TYPE=${CMAKE_BUILD_TYPE})")
+else()
+  message(STATUS "ROS2_ANDROID_DEBUG disabled (BUILD_TYPE=${CMAKE_BUILD_TYPE})")
+endif()
 
 # Enable OpenMP support
 find_package(OpenMP REQUIRED)
@@ -153,7 +161,7 @@ if(OpenMP_CXX_FOUND)
 endif()
 
 target_include_directories(${PROJECT_NAME} PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<BUILD_INTERFACE:${NCNN_DIR}/install/include>
   $<INSTALL_INTERFACE:include>
 )
@@ -173,7 +181,7 @@ install(TARGETS ${PROJECT_NAME}
   LIBRARY DESTINATION lib
 )
 
-install(DIRECTORY src/perception/
+install(DIRECTORY include/perception/
   DESTINATION include/perception
   FILES_MATCHING PATTERN "*.h"
 )

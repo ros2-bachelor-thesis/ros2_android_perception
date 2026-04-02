@@ -61,7 +61,7 @@ Library is linked into `libandroid-ros.so` and accessed via JNI.
 ros2_android_perception/
 ├── include/perception/         # Public API headers
 │   ├── ncnn_detector.h         # YOLOv9 inference
-│   ├── ncnn_reid.h             # mars-small128 feature extractor
+│   ├── ncnn_reid.h             # OSnetReID feature extractor
 │   ├── deep_sort_tracker.h     # Multi-object tracking
 │   ├── object_detection_controller.h  # Complete pipeline
 │   ├── detection.h             # Detection data structure

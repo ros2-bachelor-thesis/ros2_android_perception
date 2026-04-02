@@ -1,5 +1,6 @@
 #include "perception/deep_sort_tracker.h"
 #include "perception/linear_assignment.h"
+#include "perception/log.h"
 #include <algorithm>
 #include <cmath>
 #include <set>
@@ -55,10 +56,22 @@ std::vector<Track> DeepSortTracker::Update(
   std::set<int> matched_detections;
 
   // Step 4: Update matched tracks
+  static int frame_count = 0;
+  frame_count++;
+
   for (const auto& [track_idx, det_idx] : matches) {
     UpdateTrack(track_idx, detections_with_features[det_idx]);
     matched_tracks.insert(track_idx);
     matched_detections.insert(det_idx);
+  }
+
+  // Log matching statistics
+  int num_unmatched_tracks = tracks_.size() - matched_tracks.size();
+  int num_unmatched_dets = detections_with_features.size() - matched_detections.size();
+
+  if (frame_count <= 10 || frame_count % 5 == 0) {
+    LOGI("Frame #%d: %zu matches, %d unmatched tracks, %d unmatched dets, %zu total tracks",
+         frame_count, matches.size(), num_unmatched_tracks, num_unmatched_dets, tracks_.size());
   }
 
   // Step 5: Mark unmatched tracks as missed
@@ -311,6 +324,14 @@ float DeepSortTracker::MinCosineDistanceToGallery(
   for (const auto& gallery_feature : gallery_[track_id]) {
     float dist = CosineDistance(feature, gallery_feature);
     min_dist = std::min(min_dist, dist);
+  }
+
+  // Log first few distance calculations
+  static int dist_calc_count = 0;
+  dist_calc_count++;
+  if (dist_calc_count <= 20) {
+    LOGD("Cosine distance: track_id=%d, min_dist=%.3f (threshold=%.2f), gallery_size=%zu",
+         track_id, min_dist, config_.max_cosine_distance, gallery_[track_id].size());
   }
 
   return min_dist;

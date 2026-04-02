@@ -1,13 +1,8 @@
 #include "perception/ncnn_reid.h"
 #include "perception/image_preprocessor.h"
+#include "perception/log.h"
 #include <cmath>
 #include <ncnn/net.h>
-#include <android/log.h>
-
-#define TAG "NCNN_ReID"
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
-#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
 
 namespace perception {
 
@@ -114,12 +109,21 @@ std::vector<float> NcnnReID::Extract(const cv::Mat& image, const float bbox[4]) 
   // L2-normalize feature
   L2Normalize(feature);
 
-  // Log first successful extraction (debug)
-  static bool first_logged = false;
-  if (!first_logged) {
-    LOGI("ReID extraction successful: bbox=[%.1f,%.1f,%.1f,%.1f] → %d-dim feature",
-         bbox[0], bbox[1], bbox[2], bbox[3], feature_dim_);
-    first_logged = true;
+  // Compute L2 norm to verify normalization
+  float norm = 0.0f;
+  for (float val : feature) {
+    norm += val * val;
+  }
+  norm = std::sqrt(norm);
+
+  // Log extraction with feature statistics
+  static int extraction_count = 0;
+  extraction_count++;
+
+  if (extraction_count <= 5 || extraction_count % 10 == 0) {
+    LOGI("ReID extraction #%d: bbox=[%.1f,%.1f,%.1f,%.1f], feature_norm=%.3f, first_3=[%.3f,%.3f,%.3f]",
+         extraction_count, bbox[0], bbox[1], bbox[2], bbox[3], norm,
+         feature[0], feature[1], feature[2]);
   }
 
   return feature;

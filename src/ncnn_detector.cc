@@ -1,13 +1,8 @@
 #include "perception/ncnn_detector.h"
 #include "perception/image_preprocessor.h"
 #include "perception/nms.h"
+#include "perception/log.h"
 #include <ncnn/net.h>
-#include <android/log.h>
-
-#define TAG "NCNN_Detector"
-#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 namespace perception {
 

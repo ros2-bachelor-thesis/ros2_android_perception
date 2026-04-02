@@ -75,13 +75,35 @@ std::vector<Detection> NcnnDetector::Detect(const cv::Mat& image,
   // Input image
   ex.input(input_layer_, input);
 
-  // Run inference
-  ncnn::Mat output;
-  int ret = ex.extract(output_layer_, output);
+  // Run inference - YOLOv9 has dual detection heads (out0, out1)
+  ncnn::Mat out0, out1;
+  int ret0 = ex.extract("out0", out0);
+  int ret1 = ex.extract("out1", out1);
 
-  if (ret != 0) {
+  if (ret0 != 0 || ret1 != 0) {
     // Inference failed
     return {};
+  }
+
+  // Concatenate both detection heads along anchor dimension (height)
+  // out0: [h0, w], out1: [h1, w] → output: [h0+h1, w]
+  int total_anchors = out0.h + out1.h;
+  int num_values = out0.w;  // Should be same for both (4 + num_classes)
+
+  ncnn::Mat output(num_values, total_anchors);
+
+  // Copy out0 rows first
+  for (int i = 0; i < out0.h; i++) {
+    const float* src = out0.row(i);
+    float* dst = output.row(i);
+    memcpy(dst, src, num_values * sizeof(float));
+  }
+
+  // Copy out1 rows after out0
+  for (int i = 0; i < out1.h; i++) {
+    const float* src = out1.row(i);
+    float* dst = output.row(out0.h + i);
+    memcpy(dst, src, num_values * sizeof(float));
   }
 
   // Parse output tensor to detections (with letterbox-style scaling)
@@ -117,13 +139,14 @@ std::vector<Detection> NcnnDetector::ParseOutput(const ncnn::Mat& output,
                                                   float conf_threshold) {
   std::vector<Detection> detections;
 
-  // YOLOv9 output shape: [1, num_anchors, 5+num_classes]
-  // Each row: [cx, cy, w, h, objectness, class0_score, class1_score, class2_score]
+  // YOLOv9 output shape: [num_anchors, 4+num_classes]
+  // Each row: [cx, cy, w, h, class0_score, class1_score, class2_score]
+  // NOTE: No separate objectness in YOLOv9 output
 
   int num_anchors = output.h;  // Number of anchor boxes
-  int num_values = output.w;   // Should be 8 (4 bbox + 1 obj + 3 classes)
+  int num_values = output.w;   // Should be 7 (4 bbox + 3 classes)
 
-  if (num_values != 5 + num_classes_) {
+  if (num_values != 4 + num_classes_) {
     // Unexpected output format
     return detections;
   }
@@ -137,21 +160,22 @@ std::vector<Detection> NcnnDetector::ParseOutput(const ncnn::Mat& output,
     float cy = row[1];
     float w = row[2];
     float h = row[3];
-    float objectness = row[4];
 
     // Find best class and its score
+    // YOLOv9 output has NO separate objectness - class scores start at index 4
+    // Format: [cx, cy, w, h, class0_score, class1_score, class2_score]
     int best_class = 0;
-    float best_score = row[5];  // class 0 score
+    float best_score = row[4];  // class 0 score
     for (int c = 1; c < num_classes_; c++) {
-      float class_score = row[5 + c];
+      float class_score = row[4 + c];
       if (class_score > best_score) {
         best_score = class_score;
         best_class = c;
       }
     }
 
-    // Combined confidence: objectness * class_score
-    float confidence = objectness * best_score;
+    // Confidence is the max class score (no objectness multiplication)
+    float confidence = best_score;
 
     // Filter by confidence threshold
     if (confidence < conf_threshold) {

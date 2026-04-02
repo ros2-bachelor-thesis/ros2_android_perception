@@ -38,11 +38,12 @@ class NcnnDetector {
    * Detect objects in image
    *
    * Pipeline:
-   * 1. Preprocess: letterbox resize to 1280x736, normalize to [0,1]
-   * 2. NCNN inference: YOLOv9 forward pass
-   * 3. Decode output: parse bounding boxes + class scores
-   * 4. Filter: confidence threshold
-   * 5. NMS: class-aware non-maximum suppression
+   * 1. Preprocess: simple resize to 1280x736, normalize to [0,1]
+   * 2. NCNN inference: YOLOv9 dual-head forward pass (out0 + out1)
+   * 3. Concatenate: merge both detection heads
+   * 4. Decode output: parse bounding boxes + class scores (no objectness)
+   * 5. Filter: confidence threshold
+   * 6. NMS: class-aware non-maximum suppression
    *
    * @param image Input image (any size, BGR format from OpenCV)
    * @param conf_threshold Confidence threshold (default: 0.25)
@@ -77,15 +78,16 @@ class NcnnDetector {
   /**
    * Parse NCNN output tensor to Detection structs
    *
-   * YOLOv9 output format: [1, num_anchors, 5+num_classes]
-   * Each anchor: [cx, cy, w, h, objectness, class0_score, class1_score, class2_score]
+   * YOLOv9 output format: [num_anchors, 4+num_classes]
+   * Each anchor: [cx, cy, w, h, class0_score, class1_score, class2_score]
+   * NOTE: No separate objectness score in YOLOv9 output
    *
-   * @param output NCNN Mat output from model
+   * @param output NCNN Mat output from model (concatenated out0+out1)
    * @param img_width Original image width (for coordinate scaling)
    * @param img_height Original image height (for coordinate scaling)
    * @param gain Uniform scale factor (matches Python scale_boxes)
-   * @param pad_w Letterbox padding width (for coordinate offset)
-   * @param pad_h Letterbox padding height (for coordinate offset)
+   * @param pad_w Letterbox-style padding width (for coordinate offset)
+   * @param pad_h Letterbox-style padding height (for coordinate offset)
    * @param conf_threshold Minimum confidence to keep detection
    * @return Vector of raw detections (before NMS)
    */

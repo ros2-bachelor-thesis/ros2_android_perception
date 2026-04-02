@@ -10,12 +10,12 @@ Object detection and tracking library for ROS 2 on Android using NCNN inference 
 - **YOLOv9 Object Detection**: 3-class detector for Colorado Potato Beetle detection (beetle, larva, eggs)
 - **Deep SORT Tracking**: Multi-object tracking with appearance-based re-identification
 - **NCNN Inference**: Optimized for ARM NEON with optional Vulkan GPU acceleration
-- **ROS 2 Integration**: ObjectDetectionController provides node interface for detection pipeline
-- **Android Native**: Pure C++ implementation, integrates via JNI with ros2_android
+- **Standalone Library**: Pure C++ with no ROS dependencies - integrates via ObjectDetectionController API
+- **Android Native**: Builds as shared library, integrates via JNI with ros2_android
 
 ## Build Requirements
 
-- Android NDK 25.1 or later
+- Android NDK 26.3
 - vcstool (`pip install vcstool`)
 - CMake 3.13+
 - Build machine: Linux x86_64
@@ -23,9 +23,6 @@ Object detection and tracking library for ROS 2 on Android using NCNN inference 
 ## Quick Start
 
 ```bash
-# Set Android SDK path (NDK will be auto-detected)
-export ANDROID_HOME=~/Android/Sdk
-
 # Fetch dependencies (NCNN, Eigen, OpenCV-mobile)
 make deps
 
@@ -33,34 +30,30 @@ make deps
 make ncnn
 
 # Build perception library (default: RelWithDebInfo)
-make all
+make
 
 # Or build with specific type
 make debug    # Full debug symbols, no optimization
 make release  # Optimized, stripped symbols
-
-# Install to build/install
-make install
 ```
 
 ## Build Output
 
-- **Library**: `build/libros2_android_perception.a` (~5 MB)
-- **Headers**: `build/install/include/perception/`
-- **Models**: `build/install/share/perception/models/` (24 MB)
+- **Library**: `build/libros2_android_perception.so` (~6 MB shared library)
+- **Headers**: `include/perception/`
+- **Models**: Deployed separately (see models/README.md)
 
 ## Integration with ros2_android
 
-Add to `ros2_android/ros.repos`:
+The perception library is automatically built as a dependency via git submodule:
 
-```yaml
-  ros2_android_perception:
-    type: git
-    url: git@phabricator.ict.tuwien.ac.at:source/ros2_android_perception.git
-    version: main
+```bash
+cd ros2_android
+git submodule update --init --recursive
+make all  # Builds perception library as part of native build
 ```
 
-Then run `make deps` in the ros2_android repository.
+Library is linked into `libandroid-ros.so` and accessed via JNI.
 
 ## Architecture
 
@@ -70,61 +63,83 @@ ros2_android_perception/
 │   ├── ncnn_detector.h         # YOLOv9 inference
 │   ├── ncnn_reid.h             # mars-small128 feature extractor
 │   ├── deep_sort_tracker.h     # Multi-object tracking
-│   └── object_detection_controller.h  # ROS 2 node interface
-├── src/                        # Implementation
-├── models/                     # Pre-converted NCNN models (24 MB)
-└── deps/                       # External dependencies (managed by vcstool)
+│   ├── object_detection_controller.h  # Complete pipeline
+│   ├── detection.h             # Detection data structure
+│   ├── track.h                 # Track data structure
+│   ├── nms.h                   # Non-maximum suppression
+│   └── image_preprocessor.h    # Image preprocessing utilities
+├── src/perception/             # Implementation
+├── models/                     # NCNN models (user-provided, see models/README.md)
+└── deps/                       # External dependencies (NCNN, Eigen, OpenCV-mobile)
 ```
 
 ## API Example
 
 ```cpp
-#include <perception/ncnn_detector.h>
-#include <perception/deep_sort_tracker.h>
+#include <perception/object_detection_controller.h>
 
-// Initialize detector
-NcnnDetector detector("yolov9_s_pobed.ncnn.param",
-                      "yolov9_s_pobed.ncnn.bin",
-                      use_vulkan=true);
+// Initialize complete pipeline (YOLO + Deep SORT)
+ObjectDetectionController detector(
+    "models/yolov9_s_pobed.ncnn.param",
+    "models/yolov9_s_pobed.ncnn.bin",
+    "models/mars-small128.ncnn.param",
+    "models/mars-small128.ncnn.bin",
+    use_vulkan = false  // CPU NEON is faster on mobile
+);
 
-// Initialize tracker
-DeepSortTracker tracker("mars-small128.ncnn.param",
-                        "mars-small128.ncnn.bin",
-                        max_cosine_distance=0.4);
+// Process frame (raw RGB buffer)
+auto tracks = detector.ProcessFrame(
+    rgb_data,      // uint8_t* RGB buffer
+    width,         // Image width
+    height,        // Image height
+    conf_threshold = 0.25f,
+    iou_threshold = 0.45f
+);
 
-// Process frame
-std::vector<Detection> detections = detector.Detect(frame, 0.25, 0.45);
-std::vector<Track> tracks = tracker.Update(frame, detections);
-
-// Access results
+// Access confirmed tracks (hits >= 3 frames)
 for (const auto& track : tracks) {
-  int track_id = track.track_id;
-  int class_id = track.class_id;
-  float* bbox = track.bbox;  // [x1, y1, x2, y2]
+  int track_id = track.track_id;     // Stable ID across frames
+  int class_id = track.class_id;     // 0=beetle, 1=larva, 2=eggs
+  float* bbox = track.bbox;          // [x1, y1, x2, y2]
+  float confidence = track.confidence;
 }
 ```
 
-## ROS 2 Topics
+## Preprocessing Pipeline
 
-**Subscribed** (from external ZED camera):
-- `/zed/zed_node/rgb/image_rect_color/compressed` (sensor_msgs/CompressedImage)
-- `/zed/zed_node/depth/depth_registered` (sensor_msgs/Image)
-- `/zed/zed_node/point_cloud/cloud_registered` (sensor_msgs/PointCloud2)
+The implementation matches the Python reference exactly:
 
-**Published**:
-- `/cpb_beetle_center`, `/cpb_larva_center`, `/cpb_eggs_center` (geometry_msgs/Point)
-- `/cpb_beetle`, `/cpb_larva`, `/cpb_eggs` (sensor_msgs/PointCloud2)
+1. **Input**: Raw RGB buffer (uint8, interleaved RGB)
+2. **Resize**: Simple resize to 1280x736 (no letterbox, matches training data)
+3. **Color conversion**: BGR → RGB
+4. **Normalization**: Divide by 255.0 (uint8 → float32 [0,1])
+5. **Layout**: HWC → CHW (for NCNN)
+
+> [!IMPORTANT]
+> The model was trained with simple resize (not letterbox), so letterbox preprocessing will produce incorrect results. Coordinate scaling uses separate X/Y factors.
 
 ## Performance
 
 Tested on Pixel 7 (Tensor G2 SoC):
-- **YOLOv9 inference**: ~30-40 ms (CPU NEON)
-- **mars-small128**: ~5 ms per detection
-- **Target**: 20 Hz processing (50 ms/frame)
+
+- **YOLOv9 inference**: ~30-40 ms (CPU NEON, 1280x736 input)
+- **Deep SORT tracking**: ~10-15 ms (includes ReID feature extraction)
+- **Total pipeline**: ~50-60 ms per frame (~17-20 FPS)
+- **Memory**: ~60 MB (models + working buffers)
 
 ## Models
 
-See [models/README.md](models/README.md) for model specifications and rebuild instructions.
+See [models/README.md](models/README.md) for model specifications and conversion instructions.
+
+**Required models**:
+- `yolov9_s_pobed.ncnn.{param,bin}` (~19 MB)
+- `mars-small128.ncnn.{param,bin}` (~5 MB)
+
+## Known Issues
+
+- **0 detections**: Verify models are loaded from correct path, check logcat for errors
+- **Slow inference**: Ensure Vulkan is disabled on mobile (CPU NEON is faster)
+- **Wrong coordinates**: Model expects 1280x736 simple resize, not letterbox
 
 ## License
 
@@ -135,3 +150,4 @@ Apache 2.0
 - NCNN: https://github.com/Tencent/ncnn
 - YOLOv9: https://github.com/WongKinYiu/yolov9
 - Deep SORT: https://github.com/nwojke/deep_sort
+- Python reference: `~/uni_projects/ROS2/Vermin_Collector_ROS2_3D_Object_Detection/`

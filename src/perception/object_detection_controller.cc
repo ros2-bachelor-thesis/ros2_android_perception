@@ -59,20 +59,20 @@ std::vector<Track> ObjectDetectionController::ProcessFrame(
     return {};
   }
 
-  // Convert RGB to BGR cv::Mat (OpenCV expects BGR internally)
-  cv::Mat bgr_image(height, width, CV_8UC3);
-  for (int i = 0; i < width * height; ++i) {
-    bgr_image.data[i * 3 + 0] = rgb_data[i * 3 + 2];  // B
-    bgr_image.data[i * 3 + 1] = rgb_data[i * 3 + 1];  // G
-    bgr_image.data[i * 3 + 2] = rgb_data[i * 3 + 0];  // R
-  }
+  // Input is already BGR from TurboJPEG decompression (matches Python cv_bridge)
+  cv::Mat bgr_image(height, width, CV_8UC3, const_cast<uint8_t*>(rgb_data));
 
   // Step 1: Run YOLOv9 detector
-  // - Preprocesses image (letterbox resize to 1280x736, normalize)
+  // - Preprocesses image (simple resize to 1280x736, normalize)
   // - NCNN inference
   // - Decodes output (bbox, confidence, class)
   // - Applies NMS
   auto detections = detector_->Detect(bgr_image, conf_threshold, iou_threshold);
+
+  // Log detection count (helps debug if YOLO is detecting anything)
+  if (detections.size() > 0) {
+    // TODO: Add actual logging when available
+  }
 
   // Step 2: Update Deep SORT tracker
   // - Extracts ReID features for each detection

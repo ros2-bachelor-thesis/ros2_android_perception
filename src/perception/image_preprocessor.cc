@@ -85,8 +85,10 @@ ncnn::Mat ImagePreprocessor::ToNCNN(const cv::Mat& image) {
 ncnn::Mat ImagePreprocessor::PrepareForYOLO(const cv::Mat& image,
                                              int input_width,
                                              int input_height) {
-  // Step 1: Letterbox resize to target dimensions
-  cv::Mat resized = LetterboxResize(image, input_width, input_height);
+  // Match Python reference: simple resize without letterbox (cv2.resize((1280, 736)))
+  // Python code does NOT maintain aspect ratio - it directly resizes
+  cv::Mat resized;
+  cv::resize(image, resized, cv::Size(input_width, input_height), 0, 0, cv::INTER_LINEAR);
 
   // Step 2: Normalize and convert BGR to RGB
   cv::Mat normalized = NormalizeAndConvertRGB(resized);

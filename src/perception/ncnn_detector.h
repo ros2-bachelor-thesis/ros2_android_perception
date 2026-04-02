@@ -83,16 +83,18 @@ class NcnnDetector {
    * @param output NCNN Mat output from model
    * @param img_width Original image width (for coordinate scaling)
    * @param img_height Original image height (for coordinate scaling)
-   * @param scale Letterbox resize scale factor
-   * @param pad_w Letterbox padding width
-   * @param pad_h Letterbox padding height
+   * @param scale_x X-axis scale factor (img_width / input_width)
+   * @param scale_y Y-axis scale factor (img_height / input_height)
+   * @param pad_w Letterbox padding width (0 for simple resize)
+   * @param pad_h Letterbox padding height (0 for simple resize)
    * @param conf_threshold Minimum confidence to keep detection
    * @return Vector of raw detections (before NMS)
    */
   std::vector<Detection> ParseOutput(const ncnn::Mat& output,
                                       int img_width,
                                       int img_height,
-                                      float scale,
+                                      float scale_x,
+                                      float scale_y,
                                       int pad_w,
                                       int pad_h,
                                       float conf_threshold);

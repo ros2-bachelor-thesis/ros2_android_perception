@@ -53,12 +53,14 @@ std::vector<Detection> NcnnDetector::Detect(const cv::Mat& image,
   int img_width = image.cols;
   int img_height = image.rows;
 
-  // Preprocess: letterbox resize + normalize
+  // Preprocess: simple resize (no letterbox) to match Python reference
   ncnn::Mat input = ImagePreprocessor::PrepareForYOLO(image, input_width_, input_height_);
 
-  // Get letterbox parameters for coordinate mapping
-  auto letterbox_params = ImagePreprocessor::GetLetterboxParams(
-      img_width, img_height, input_width_, input_height_);
+  // Python does simple resize without maintaining aspect ratio, so:
+  // - No letterbox padding (pad_w = pad_h = 0)
+  // - Direct scaling from model input size to original image size
+  float scale_x = static_cast<float>(img_width) / input_width_;
+  float scale_y = static_cast<float>(img_height) / input_height_;
 
   // Create NCNN extractor
   ncnn::Extractor ex = net_.create_extractor();
@@ -77,18 +79,27 @@ std::vector<Detection> NcnnDetector::Detect(const cv::Mat& image,
     return {};
   }
 
-  // Parse output tensor to detections
+  // Parse output tensor to detections (with simple resize scaling)
   std::vector<Detection> detections = ParseOutput(
       output,
       img_width,
       img_height,
-      letterbox_params.scale,
-      letterbox_params.pad_w,
-      letterbox_params.pad_h,
+      scale_x,
+      scale_y,
+      0,  // No padding for simple resize
+      0,  // No padding for simple resize
       conf_threshold);
+
+  // Log raw detection count before NMS
+  size_t raw_count = detections.size();
 
   // Apply class-aware NMS
   detections = NMS::ApplyPerClass(detections, iou_threshold);
+
+  // Log only if we have detections (avoid spam)
+  if (raw_count > 0 || detections.size() > 0) {
+    // Note: We don't have direct logging here, but caller will log
+  }
 
   return detections;
 }
@@ -96,7 +107,8 @@ std::vector<Detection> NcnnDetector::Detect(const cv::Mat& image,
 std::vector<Detection> NcnnDetector::ParseOutput(const ncnn::Mat& output,
                                                   int img_width,
                                                   int img_height,
-                                                  float scale,
+                                                  float scale_x,
+                                                  float scale_y,
                                                   int pad_w,
                                                   int pad_h,
                                                   float conf_threshold) {
@@ -143,24 +155,25 @@ std::vector<Detection> NcnnDetector::ParseOutput(const ncnn::Mat& output,
       continue;
     }
 
-    // Convert center/size to corner coordinates (x1,y1,x2,y2)
+    // Convert center/size to corner coordinates (x1,y1,x2,y2) in model input space
     float x1 = cx - w / 2.0f;
     float y1 = cy - h / 2.0f;
     float x2 = cx + w / 2.0f;
     float y2 = cy + h / 2.0f;
 
-    // Map from letterbox space (1280x736) back to original image space
-    // 1. Remove padding offset
+    // Map from model input space (1280x736) back to original image space
+    // For simple resize: just apply scale factors (no padding to remove)
+    // 1. Remove padding offset (0 for simple resize)
     x1 = x1 - pad_w;
     y1 = y1 - pad_h;
     x2 = x2 - pad_w;
     y2 = y2 - pad_h;
 
-    // 2. Scale back to original dimensions
-    x1 = x1 / scale;
-    y1 = y1 / scale;
-    x2 = x2 / scale;
-    y2 = y2 / scale;
+    // 2. Scale back to original dimensions (separate X/Y scales for simple resize)
+    x1 = x1 * scale_x;
+    y1 = y1 * scale_y;
+    x2 = x2 * scale_x;
+    y2 = y2 * scale_y;
 
     // 3. Clamp to image boundaries
     x1 = std::max(0.0f, std::min(x1, static_cast<float>(img_width - 1)));

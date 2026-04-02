@@ -119,11 +119,11 @@ ncnn::Mat ImagePreprocessor::PrepareForReID(const cv::Mat& image,
   cv::Rect roi(x1, y1, x2 - x1, y2 - y1);
   cv::Mat cropped = image(roi);
 
-  // Resize to ReID input size (128x64)
+  // Resize to ReID input size (128x256 for OSNet)
   cv::Mat resized;
   cv::resize(cropped, resized, cv::Size(target_width, target_height), 0, 0, cv::INTER_LINEAR);
 
-  // Convert BGR to RGB (but keep as uint8, mars-small128 expects uint8 input)
+  // Convert BGR to RGB (OSNet expects uint8 input, not normalized)
   cv::Mat rgb;
   cv::cvtColor(resized, rgb, cv::COLOR_BGR2RGB);
 

@@ -53,8 +53,8 @@ namespace perception
     /**
      * Constructor
      *
-     * @param reid_param Path to mars-small128.ncnn.param
-     * @param reid_bin Path to mars-small128.ncnn.bin
+     * @param reid_param Path to osnet_ain_x1_0.ncnn.param
+     * @param reid_bin Path to osnet_ain_x1_0.ncnn.bin
      * @param config Tracker configuration parameters
      */
     DeepSortTracker(const std::string &reid_param,

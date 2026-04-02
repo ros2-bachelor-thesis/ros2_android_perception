@@ -1,16 +1,21 @@
 #include "perception/ncnn_reid.h"
 #include "perception/image_preprocessor.h"
-#include "perception/ncnn_shape_layer.h"
 #include <cmath>
 #include <ncnn/net.h>
+#include <android/log.h>
+
+#define TAG "NCNN_ReID"
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
+#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
 
 namespace perception {
 
 NcnnReID::NcnnReID(const std::string& param_path, const std::string& bin_path)
     : loaded_(false),
-      input_width_(64),
-      input_height_(128),
-      feature_dim_(128) {
+      input_width_(128),
+      input_height_(256),
+      feature_dim_(512) {
   loaded_ = LoadModel(param_path, bin_path);
 }
 
@@ -20,8 +25,6 @@ NcnnReID::~NcnnReID() {
 
 bool NcnnReID::LoadModel(const std::string& param_path,
                           const std::string& bin_path) {
-  // Register custom Shape layer (required for mars-small128 BatchNorm/Reshape)
-  net_.register_custom_layer("Shape", Shape_layer_creator);
 
   // Configure NCNN options (no Vulkan - small model, CPU sufficient)
   ncnn::Option opt;
@@ -64,15 +67,15 @@ std::vector<float> NcnnReID::Extract(const cv::Mat& image, const float bbox[4]) 
   cv::Rect roi(x1, y1, x2 - x1, y2 - y1);
   cv::Mat cropped = image(roi).clone();
 
-  // Resize to ReID input size (128x64)
+  // Resize to ReID input size (128x256 for OSNet)
   cv::Mat resized;
   cv::resize(cropped, resized, cv::Size(input_width_, input_height_));
 
-  // Convert BGR to RGB (mars-small128 expects RGB)
+  // Convert BGR to RGB (OSNet expects RGB)
   cv::Mat rgb;
   cv::cvtColor(resized, rgb, cv::COLOR_BGR2RGB);
 
-  // IMPORTANT: mars-small128 expects uint8 [0-255], NOT normalized [0-1]
+  // IMPORTANT: OSNet expects uint8 [0-255], NOT normalized [0-1]
   // Create NCNN Mat from pixel data
   ncnn::Mat input = ncnn::Mat::from_pixels(
       rgb.data, ncnn::Mat::PIXEL_RGB, input_width_, input_height_);
@@ -89,13 +92,15 @@ std::vector<float> NcnnReID::Extract(const cv::Mat& image, const float bbox[4]) 
   int ret = ex.extract(output_layer_, output);
 
   if (ret != 0) {
+    LOGE("ReID inference failed: ex.extract returned %d", ret);
     return feature;
   }
 
-  // Extract feature vector (should be 128-dim)
+  // Extract feature vector (should be 512-dim for OSNet)
   int feature_size = output.w * output.h * output.c;
   if (feature_size != feature_dim_) {
-    // Unexpected output dimension
+    LOGE("ReID output dimension mismatch: got %d (c=%d, h=%d, w=%d), expected %d",
+         feature_size, output.c, output.h, output.w, feature_dim_);
     return feature;
   }
 
@@ -108,6 +113,14 @@ std::vector<float> NcnnReID::Extract(const cv::Mat& image, const float bbox[4]) 
 
   // L2-normalize feature
   L2Normalize(feature);
+
+  // Log first successful extraction (debug)
+  static bool first_logged = false;
+  if (!first_logged) {
+    LOGI("ReID extraction successful: bbox=[%.1f,%.1f,%.1f,%.1f] → %d-dim feature",
+         bbox[0], bbox[1], bbox[2], bbox[3], feature_dim_);
+    first_logged = true;
+  }
 
   return feature;
 }

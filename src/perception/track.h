@@ -31,7 +31,7 @@ struct Track {
   Eigen::MatrixXf covariance;
 
   /**
-   * Smoothed appearance feature (128-dim from mars-small128)
+   * Smoothed appearance feature (512-dim from OSNet-AIN)
    * Updated as exponential moving average of detection features
    */
   std::vector<float> feature;

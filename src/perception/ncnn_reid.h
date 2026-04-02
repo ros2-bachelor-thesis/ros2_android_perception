@@ -9,14 +9,14 @@ namespace perception
 {
 
   /**
-   * mars-small128 ReID feature extractor using NCNN
+   * OSNet-AIN ReID feature extractor using NCNN
    *
-   * Extracts 128-dimensional appearance features from detection bounding boxes
+   * Extracts 512-dimensional appearance features from detection bounding boxes
    * for Deep SORT tracking. Features are L2-normalized for cosine distance matching.
    *
-   * Model: mars-small128 (trained on Market-1501 + MARS datasets)
-   * Input: 128x64 RGB uint8 (NOT normalized - expects 0-255 range)
-   * Output: 128-dim float32 L2-normalized feature vector
+   * Model: OSNet-AIN x1.0 (trained on Market-1501, CUHK03, MSMT17, DukeMTMC)
+   * Input: 128x256 RGB uint8 (NOT normalized - expects 0-255 range)
+   * Output: 512-dim float32 L2-normalized feature vector
    */
   class NcnnReID
   {
@@ -24,8 +24,8 @@ namespace perception
     /**
      * Constructor - load NCNN ReID model
      *
-     * @param param_path Path to mars-small128.ncnn.param file
-     * @param bin_path Path to mars-small128.ncnn.bin file
+     * @param param_path Path to osnet_ain_x1_0.ncnn.param file
+     * @param bin_path Path to osnet_ain_x1_0.ncnn.bin file
      */
     NcnnReID(const std::string &param_path, const std::string &bin_path);
 
@@ -36,14 +36,14 @@ namespace perception
      *
      * Pipeline:
      * 1. Crop bbox region from image
-     * 2. Resize to 128x64 (ReID input size)
-     * 3. Convert to uint8 RGB (mars-small128 expects 0-255, not normalized!)
+     * 2. Resize to 128x256 (OSNet input size)
+     * 3. Convert to uint8 RGB (OSNet expects 0-255, not normalized!)
      * 4. NCNN inference
      * 5. L2-normalize output feature
      *
      * @param image Source image (BGR format from OpenCV)
      * @param bbox Bounding box [x1, y1, x2, y2] to extract feature from
-     * @return 128-dimensional L2-normalized feature vector (empty if error)
+     * @return 512-dimensional L2-normalized feature vector (empty if error)
      */
     std::vector<float> Extract(const cv::Mat &image, const float bbox[4]);
 
@@ -53,7 +53,7 @@ namespace perception
     bool IsLoaded() const { return loaded_; }
 
     /**
-     * Get expected feature dimension (should be 128)
+     * Get expected feature dimension (512 for OSNet)
      */
     int GetFeatureDim() const { return feature_dim_; }
 
@@ -79,13 +79,13 @@ namespace perception
 
     ncnn::Net net_;    ///< NCNN inference network
     bool loaded_;      ///< Model load status
-    int input_width_;  ///< ReID input width (64 for mars-small128)
-    int input_height_; ///< ReID input height (128 for mars-small128)
-    int feature_dim_;  ///< Output feature dimension (128)
+    int input_width_;  ///< ReID input width (128 for OSNet)
+    int input_height_; ///< ReID input height (256 for OSNet)
+    int feature_dim_;  ///< Output feature dimension (512 for OSNet)
 
-    // Layer names from NCNN conversion (tf2onnx → onnx2ncnn)
-    const char *input_layer_ = "images:0";
-    const char *output_layer_ = "features:0";
+    // Layer names from NCNN conversion (ONNX → NCNN)
+    const char *input_layer_ = "in0";
+    const char *output_layer_ = "out0";
   };
 
 } // namespace perception

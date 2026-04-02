@@ -36,8 +36,8 @@ namespace perception
          *
          * @param yolo_param Path to yolov9_s_pobed.ncnn.param
          * @param yolo_bin Path to yolov9_s_pobed.ncnn.bin
-         * @param reid_param Path to mars-small128.ncnn.param
-         * @param reid_bin Path to mars-small128.ncnn.bin
+         * @param reid_param Path to osnet_ain_x1_0.ncnn.param
+         * @param reid_bin Path to osnet_ain_x1_0.ncnn.bin
          * @param use_vulkan Use GPU acceleration (default: false, CPU NEON faster on ARM)
          */
         ObjectDetectionController(

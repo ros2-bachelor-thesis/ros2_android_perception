@@ -82,8 +82,8 @@ ros2_android_perception/
 ObjectDetectionController detector(
     "models/yolov9_s_pobed.ncnn.param",
     "models/yolov9_s_pobed.ncnn.bin",
-    "models/mars-small128.ncnn.param",
-    "models/mars-small128.ncnn.bin",
+    "models/osnet_ain_x1_0.ncnn.param",
+    "models/osnet_ain_x1_0.ncnn.bin",
     use_vulkan = false  // CPU NEON is faster on mobile
 );
 
@@ -127,13 +127,10 @@ Tested on Pixel 7 (Tensor G2 SoC):
 - **Total pipeline**: ~50-60 ms per frame (~17-20 FPS)
 - **Memory**: ~60 MB (models + working buffers)
 
-## Models
-
-See [models/README.md](models/README.md) for model specifications and conversion instructions.
-
 **Required models**:
+
 - `yolov9_s_pobed.ncnn.{param,bin}` (~19 MB)
-- `mars-small128.ncnn.{param,bin}` (~5 MB)
+- `osnet_ain_x1_0.ncnn.{param,bin}` (~5 MB)
 
 ## Known Issues
 
@@ -150,4 +147,5 @@ Apache 2.0
 - NCNN: https://github.com/Tencent/ncnn
 - YOLOv9: https://github.com/WongKinYiu/yolov9
 - Deep SORT: https://github.com/nwojke/deep_sort
-- Python reference: `~/uni_projects/ROS2/Vermin_Collector_ROS2_3D_Object_Detection/`
+- Python reference: `~/uni_projects/ROS2/Vermin_Collector_ROS2_3D_Object_Detection/
+- ReID model reference: https://kaiyangzhou.github.io/deep-person-reid/MODEL_ZOO

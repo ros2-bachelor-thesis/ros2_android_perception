@@ -21,7 +21,7 @@ struct Detection {
   /** Class ID: 0=cpb_beetle, 1=cpb_larva, 2=cpb_eggs */
   int class_id;
 
-  /** 128-dimensional appearance feature from ReID network (mars-small128) */
+  /** 512-dimensional appearance feature from ReID network (OSNet-AIN) */
   std::vector<float> feature;
 
   Detection() : confidence(0.0f), class_id(-1) {

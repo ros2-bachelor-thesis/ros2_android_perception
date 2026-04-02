@@ -2,6 +2,12 @@
 #include "perception/image_preprocessor.h"
 #include "perception/nms.h"
 #include <ncnn/net.h>
+#include <android/log.h>
+
+#define TAG "NCNN_Detector"
+#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 namespace perception {
 
@@ -81,30 +87,100 @@ std::vector<Detection> NcnnDetector::Detect(const cv::Mat& image,
   int ret1 = ex.extract("out1", out1);
 
   if (ret0 != 0 || ret1 != 0) {
-    // Inference failed
+    LOGE("Inference failed! ret0=%d, ret1=%d", ret0, ret1);
     return {};
   }
 
-  // Concatenate both detection heads along anchor dimension (height)
-  // out0: [h0, w], out1: [h1, w] → output: [h0+h1, w]
-  int total_anchors = out0.h + out1.h;
-  int num_values = out0.w;  // Should be same for both (4 + num_classes)
+  LOGI("NCNN output shapes: out0=[c=%d, h=%d, w=%d] (dims=%d), out1=[c=%d, h=%d, w=%d] (dims=%d)",
+       out0.c, out0.h, out0.w, out0.dims, out1.c, out1.h, out1.w, out1.dims);
 
-  ncnn::Mat output(num_values, total_anchors);
-
-  // Copy out0 rows first
-  for (int i = 0; i < out0.h; i++) {
-    const float* src = out0.row(i);
-    float* dst = output.row(i);
-    memcpy(dst, src, num_values * sizeof(float));
+  // Log first few values from out0 for debugging
+  if (out0.total() > 7) {
+    const float* data0 = (const float*)out0.data;
+    LOGD("out0 first 7 values: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
+         data0[0], data0[1], data0[2], data0[3], data0[4], data0[5], data0[6]);
   }
 
-  // Copy out1 rows after out0
-  for (int i = 0; i < out1.h; i++) {
-    const float* src = out1.row(i);
-    float* dst = output.row(out0.h + i);
-    memcpy(dst, src, num_values * sizeof(float));
+  // Check output format and reshape if needed
+  // Expected: [num_anchors, 7] where 7 = 4 bbox + 3 classes
+  // Common NCNN formats:
+  //   - 2D: [h=num_anchors, w=7] (correct format)
+  //   - 2D transposed: [h=7, w=num_anchors] (needs transpose)
+  //   - 3D: [c=1, h=num_anchors, w=7] (flatten to 2D)
+
+  ncnn::Mat output;
+
+  // Case 1: 3D tensor [1, N, 7] - flatten to 2D
+  if (out0.dims == 3 && out0.c == 1) {
+    LOGI("Detected 3D format [c=1, h=%d, w=%d], flattening to 2D", out0.h, out0.w);
+    // Reshape both heads to 2D
+    ncnn::Mat out0_2d(out0.w, out0.h);  // [h, w]
+    memcpy(out0_2d.data, out0.data, out0.total() * sizeof(float));
+
+    ncnn::Mat out1_2d(out1.w, out1.h);
+    memcpy(out1_2d.data, out1.data, out1.total() * sizeof(float));
+
+    // Concatenate
+    int total_h = out0_2d.h + out1_2d.h;
+    output = ncnn::Mat(out0_2d.w, total_h);
+    memcpy(output.data, out0_2d.data, out0_2d.total() * sizeof(float));
+    memcpy((float*)output.data + out0_2d.total(), out1_2d.data, out1_2d.total() * sizeof(float));
   }
+  // Case 2: 2D tensor needs transpose [7, N] → [N, 7]
+  else if (out0.dims == 2 && out0.h == (4 + num_classes_)) {
+    LOGI("Detected transposed format [h=%d, w=%d], transposing", out0.h, out0.w);
+    // Transpose: out0[h=7, w=N] → [N, 7]
+    int N0 = out0.w;
+    int N1 = out1.w;
+    int total_anchors = N0 + N1;
+
+    output = ncnn::Mat(4 + num_classes_, total_anchors);
+
+    // Transpose out0
+    for (int i = 0; i < out0.h; i++) {
+      for (int j = 0; j < out0.w; j++) {
+        output.row(j)[i] = out0.row(i)[j];
+      }
+    }
+
+    // Transpose out1 and append
+    for (int i = 0; i < out1.h; i++) {
+      for (int j = 0; j < out1.w; j++) {
+        output.row(N0 + j)[i] = out1.row(i)[j];
+      }
+    }
+  }
+  // Case 3: Already correct 2D format [N, 7]
+  else if (out0.dims == 2 && out0.w == (4 + num_classes_)) {
+    LOGI("Correct 2D format [h=%d, w=%d], concatenating", out0.h, out0.w);
+    int total_anchors = out0.h + out1.h;
+    int num_values = out0.w;
+
+    output = ncnn::Mat(num_values, total_anchors);
+
+    // Copy out0 rows first
+    for (int i = 0; i < out0.h; i++) {
+      const float* src = out0.row(i);
+      float* dst = output.row(i);
+      memcpy(dst, src, num_values * sizeof(float));
+    }
+
+    // Copy out1 rows after out0
+    for (int i = 0; i < out1.h; i++) {
+      const float* src = out1.row(i);
+      float* dst = output.row(out0.h + i);
+      memcpy(dst, src, num_values * sizeof(float));
+    }
+  }
+  // Case 4: Unknown format - error
+  else {
+    LOGE("Unsupported NCNN output format: out0=[c=%d, h=%d, w=%d], out1=[c=%d, h=%d, w=%d]",
+         out0.c, out0.h, out0.w, out1.c, out1.h, out1.w);
+    LOGE("Expected: [N, 7] or [7, N] or [1, N, 7]. Check model conversion.");
+    return {};
+  }
+
+  LOGI("NCNN concatenated output: [%d x %d]", output.h, output.w);
 
   // Parse output tensor to detections (with letterbox-style scaling)
   std::vector<Detection> detections = ParseOutput(
@@ -116,16 +192,20 @@ std::vector<Detection> NcnnDetector::Detect(const cv::Mat& image,
       pad_h,
       conf_threshold);
 
-  // Log raw detection count before NMS
   size_t raw_count = detections.size();
+  LOGI("NCNN raw detections: %zu (before NMS, conf>%.2f)", raw_count, conf_threshold);
+
+  if (raw_count > 0) {
+    const auto& det = detections[0];
+    LOGI("NCNN first detection: bbox=[%.1f,%.1f,%.1f,%.1f] conf=%.3f class=%d",
+         det.bbox[0], det.bbox[1], det.bbox[2], det.bbox[3],
+         det.confidence, det.class_id);
+  }
 
   // Apply class-aware NMS
   detections = NMS::ApplyPerClass(detections, iou_threshold);
 
-  // Log only if we have detections (avoid spam)
-  if (raw_count > 0 || detections.size() > 0) {
-    // Note: We don't have direct logging here, but caller will log
-  }
+  LOGI("NCNN detections after NMS: %zu", detections.size());
 
   return detections;
 }
@@ -146,9 +226,18 @@ std::vector<Detection> NcnnDetector::ParseOutput(const ncnn::Mat& output,
   int num_anchors = output.h;  // Number of anchor boxes
   int num_values = output.w;   // Should be 7 (4 bbox + 3 classes)
 
+  LOGD("ParseOutput: num_anchors=%d, num_values=%d (expected %d)",
+       num_anchors, num_values, 4 + num_classes_);
+
   if (num_values != 4 + num_classes_) {
-    // Unexpected output format
+    LOGE("ParseOutput: WRONG tensor width! Got %d, expected %d", num_values, 4 + num_classes_);
     return detections;
+  }
+
+  if (num_anchors > 0) {
+    const float* row0 = output.row(0);
+    LOGD("ParseOutput first anchor: [%.2f,%.2f,%.2f,%.2f] scores=[%.3f,%.3f,%.3f]",
+         row0[0], row0[1], row0[2], row0[3], row0[4], row0[5], row0[6]);
   }
 
   // Iterate over all anchors

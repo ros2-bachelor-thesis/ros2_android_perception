@@ -163,6 +163,7 @@ target_link_libraries(${PROJECT_NAME} PUBLIC
   opencv_imgproc
   opencv_core
   Eigen3::Eigen
+  log  # Android logging
 )
 
 # Install targets
@@ -181,8 +182,8 @@ install(DIRECTORY src/perception/
 install(FILES
   models/yolov9_s_pobed.ncnn.param
   models/yolov9_s_pobed.ncnn.bin
-  models/mars-small128.ncnn.param
-  models/mars-small128.ncnn.bin
+  models/osnet_ain_x1_0.ncnn.param
+  models/osnet_ain_x1_0.ncnn.bin
   DESTINATION share/perception/models
 )
 

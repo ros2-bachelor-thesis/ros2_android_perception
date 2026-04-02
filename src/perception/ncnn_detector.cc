@@ -56,11 +56,16 @@ std::vector<Detection> NcnnDetector::Detect(const cv::Mat& image,
   // Preprocess: simple resize (no letterbox) to match Python reference
   ncnn::Mat input = ImagePreprocessor::PrepareForYOLO(image, input_width_, input_height_);
 
-  // Python does simple resize without maintaining aspect ratio, so:
-  // - No letterbox padding (pad_w = pad_h = 0)
-  // - Direct scaling from model input size to original image size
-  float scale_x = static_cast<float>(img_width) / input_width_;
-  float scale_y = static_cast<float>(img_height) / input_height_;
+  // Python uses letterbox-style coordinate scaling even with simple resize:
+  // gain = min(model_h / orig_h, model_w / orig_w)
+  // pad = ((model_w - orig_w * gain) / 2, (model_h - orig_h * gain) / 2)
+  // This matches scale_boxes() in utils/general.py line 831-832
+  float gain = std::min(
+      static_cast<float>(input_height_) / img_height,
+      static_cast<float>(input_width_) / img_width
+  );
+  float pad_w = (input_width_ - img_width * gain) / 2.0f;
+  float pad_h = (input_height_ - img_height * gain) / 2.0f;
 
   // Create NCNN extractor
   ncnn::Extractor ex = net_.create_extractor();
@@ -79,15 +84,14 @@ std::vector<Detection> NcnnDetector::Detect(const cv::Mat& image,
     return {};
   }
 
-  // Parse output tensor to detections (with simple resize scaling)
+  // Parse output tensor to detections (with letterbox-style scaling)
   std::vector<Detection> detections = ParseOutput(
       output,
       img_width,
       img_height,
-      scale_x,
-      scale_y,
-      0,  // No padding for simple resize
-      0,  // No padding for simple resize
+      gain,
+      pad_w,
+      pad_h,
       conf_threshold);
 
   // Log raw detection count before NMS
@@ -107,10 +111,9 @@ std::vector<Detection> NcnnDetector::Detect(const cv::Mat& image,
 std::vector<Detection> NcnnDetector::ParseOutput(const ncnn::Mat& output,
                                                   int img_width,
                                                   int img_height,
-                                                  float scale_x,
-                                                  float scale_y,
-                                                  int pad_w,
-                                                  int pad_h,
+                                                  float gain,
+                                                  float pad_w,
+                                                  float pad_h,
                                                   float conf_threshold) {
   std::vector<Detection> detections;
 
@@ -162,18 +165,13 @@ std::vector<Detection> NcnnDetector::ParseOutput(const ncnn::Mat& output,
     float y2 = cy + h / 2.0f;
 
     // Map from model input space (1280x736) back to original image space
-    // For simple resize: just apply scale factors (no padding to remove)
-    // 1. Remove padding offset (0 for simple resize)
-    x1 = x1 - pad_w;
-    y1 = y1 - pad_h;
-    x2 = x2 - pad_w;
-    y2 = y2 - pad_h;
-
-    // 2. Scale back to original dimensions (separate X/Y scales for simple resize)
-    x1 = x1 * scale_x;
-    y1 = y1 * scale_y;
-    x2 = x2 * scale_x;
-    y2 = y2 * scale_y;
+    // Python uses letterbox-style scaling (uniform gain) even with simple resize:
+    // boxes[:, [0,2]] -= pad[0]; boxes[:, [1,3]] -= pad[1]; boxes[:, :4] /= gain
+    // (utils/general.py scale_boxes() lines 837-839)
+    x1 = (x1 - pad_w) / gain;
+    y1 = (y1 - pad_h) / gain;
+    x2 = (x2 - pad_w) / gain;
+    y2 = (y2 - pad_h) / gain;
 
     // 3. Clamp to image boundaries
     x1 = std::max(0.0f, std::min(x1, static_cast<float>(img_width - 1)));

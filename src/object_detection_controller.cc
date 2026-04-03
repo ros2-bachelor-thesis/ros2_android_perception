@@ -77,12 +77,13 @@ namespace perception
 
     // Load Deep SORT tracker (includes ReID model)
     DeepSortConfig config;
-    // Tuned for lower false positives:
-    config.max_cosine_distance = 0.3f; // Stricter appearance matching (was 0.4)
+    // Relaxed thresholds to handle camera motion (handheld Android device)
+    // When camera moves, Kalman predictions drift and matching becomes harder
+    config.max_cosine_distance = 0.5f; // ReID appearance matching (relaxed from 0.4 for camera motion)
     config.nn_budget = 100;            // Feature gallery size (Android memory constraint)
-    config.max_age = 15;               // Delete lost tracks faster (was 30)
-    config.n_init = 5;                 // Require more hits to confirm (was 3)
-    config.max_iou_distance = 0.7f;    // IoU fallback matching
+    config.max_age = 20;               // Delete lost tracks (increased from 15 to survive brief occlusions during motion)
+    config.n_init = 3;                 // Min consecutive hits to confirm track
+    config.max_iou_distance = 0.7f;    // IoU fallback matching (primary method for motion compensation)
 
     tracker_ = std::make_unique<DeepSortTracker>(
         reid_param, reid_bin, config);
@@ -172,7 +173,8 @@ namespace perception
       int depth_width,
       int depth_height,
       float conf_threshold,
-      float iou_threshold)
+      float iou_threshold,
+      bool enable_tracking)
   {
 
     PerceptionResult result;
@@ -202,29 +204,25 @@ namespace perception
 
     LOGD("YOLO detection: %zu detections in %.1f ms", all_detections.size(), detect_ms);
 
-    // Step 2: Filter detections by confidence threshold (matches Python line 245)
-    std::vector<Detection> filtered_detections;
-    for (const auto &det : all_detections)
+    // Step 2: Conditionally update Deep SORT tracker
+    std::vector<Track> all_tracks;
+    if (enable_tracking)
     {
-      if (det.confidence > conf_threshold)
-      {
-        filtered_detections.push_back(det);
-      }
+      auto track_start = std::chrono::high_resolution_clock::now();
+      all_tracks = tracker_->Update(rgb_bgr, all_detections);
+      auto track_end = std::chrono::high_resolution_clock::now();
+      double track_ms = std::chrono::duration<double, std::milli>(track_end - track_start).count();
+
+      LOGD("Deep SORT tracking: %zu tracks in %.1f ms (ReID + matching + Kalman)",
+           all_tracks.size(), track_ms);
+    }
+    else
+    {
+      LOGD("Tracking disabled - using detections only");
     }
 
-    LOGD("Filtered detections: %zu (conf > %.2f)", filtered_detections.size(), conf_threshold);
-
-    // Step 3: Update Deep SORT tracker
-    auto track_start = std::chrono::high_resolution_clock::now();
-    auto all_tracks = tracker_->Update(rgb_bgr, filtered_detections);
-    auto track_end = std::chrono::high_resolution_clock::now();
-    double track_ms = std::chrono::duration<double, std::milli>(track_end - track_start).count();
-
-    LOGD("Deep SORT tracking: %zu tracks in %.1f ms (ReID + matching + Kalman)",
-         all_tracks.size(), track_ms);
-
-    // Step 4: Store detections and tracks
-    result.detections = filtered_detections;
+    // Step 3: Store detections and tracks
+    result.detections = all_detections;
     result.tracks = all_tracks;
 
     // Step 5: Generate annotated RGB visualization
@@ -239,29 +237,44 @@ namespace perception
         cv::Scalar(215, 20, 20)  // Blue for cpb_eggs
     };
 
-    // Draw YOLO detections on RGB (matches Python lines 248-249)
-    for (const auto &det : result.detections)
+    if (enable_tracking)
     {
-      std::string label = std::string(GetClassName(det.class_id)) +
-                          " " + std::to_string(det.confidence).substr(0, 4);
-      annotator.DrawBoundingBox(annotated_rgb, det.bbox, label,
-                                colors[det.class_id]);
+      // Draw only confirmed Deep SORT tracks with class labels and track IDs
+      int confirmed_count = 0;
+      for (const auto &track : result.tracks)
+      {
+        if (!track.is_confirmed)
+          continue; // Skip tentative tracks
+
+        confirmed_count++;
+
+        // Label format: "cpb_beetle ID: 5"
+        std::string label = std::string(GetClassName(track.class_id)) +
+                            " ID: " + std::to_string(track.track_id);
+
+        // Use class-based color (same color for same class)
+        annotator.DrawBoundingBox(annotated_rgb, track.bbox, label,
+                                  colors[track.class_id]);
+      }
+
+      LOGD("Visualization: %d confirmed / %zu total tracks", confirmed_count, result.tracks.size());
     }
-
-    // Draw Deep SORT track IDs on RGB (matches Python lines 374-381)
-    for (const auto &track : result.tracks)
+    else
     {
-      if (!track.is_confirmed)
-        continue; // Only draw confirmed tracks
+      // Draw raw YOLO detections (no track IDs)
+      for (const auto &det : result.detections)
+      {
+        // Label format: "cpb_beetle 0.95" (class + confidence)
+        char conf_str[16];
+        snprintf(conf_str, sizeof(conf_str), "%.2f", det.confidence);
+        std::string label = std::string(GetClassName(det.class_id)) + " " + conf_str;
 
-      // Generate color based on track_id (matches Python line 377-378)
-      int color_idx = track.track_id % 100;
-      cv::Scalar track_color(
-          (color_idx * 71) % 256, // Simple pseudo-random color generation
-          (color_idx * 151) % 256,
-          (color_idx * 211) % 256);
+        // Use class-based color (same color for same class)
+        annotator.DrawBoundingBox(annotated_rgb, det.bbox, label,
+                                  colors[det.class_id]);
+      }
 
-      annotator.DrawTrackId(annotated_rgb, track.track_id, track.bbox, track_color);
+      LOGD("Visualization: %zu detections (tracking disabled)", result.detections.size());
     }
 
     // Copy annotated RGB to result (cv::Mat → std::vector)
@@ -277,14 +290,34 @@ namespace perception
       result.has_depth_visualization = true;
       cv::Mat annotated_depth = GenerateDepthColormap(depth);
 
-      // Draw YOLO detections on depth colormap (matches Python lines 268-269)
-      // NOTE: Does NOT draw track IDs, only YOLO boxes
-      for (const auto &det : result.detections)
+      if (enable_tracking)
       {
-        std::string label = std::string(GetClassName(det.class_id)) +
-                            " " + std::to_string(det.confidence).substr(0, 4);
-        annotator.DrawBoundingBox(annotated_depth, det.bbox, label,
-                                  colors[det.class_id]);
+        // Draw only confirmed Deep SORT tracks on depth colormap
+        for (const auto &track : result.tracks)
+        {
+          if (!track.is_confirmed)
+            continue; // Skip tentative tracks
+
+          // Label format: "cpb_beetle ID: 5"
+          std::string label = std::string(GetClassName(track.class_id)) +
+                              " ID: " + std::to_string(track.track_id);
+          annotator.DrawBoundingBox(annotated_depth, track.bbox, label,
+                                    colors[track.class_id]);
+        }
+      }
+      else
+      {
+        // Draw raw YOLO detections on depth colormap
+        for (const auto &det : result.detections)
+        {
+          // Label format: "cpb_beetle 0.95" (class + confidence)
+          char conf_str[16];
+          snprintf(conf_str, sizeof(conf_str), "%.2f", det.confidence);
+          std::string label = std::string(GetClassName(det.class_id)) + " " + conf_str;
+
+          annotator.DrawBoundingBox(annotated_depth, det.bbox, label,
+                                    colors[det.class_id]);
+        }
       }
 
       // Copy annotated depth to result (cv::Mat → std::vector)

@@ -42,6 +42,9 @@ struct Track {
   /** Total number of successful detection matches */
   int hits;
 
+  /** Total number of frames since track was created (Python parity) */
+  int age;
+
   /**
    * Track confirmation status
    * Confirmed after N consecutive hits (default N=3)
@@ -57,6 +60,7 @@ struct Track {
         covariance(Eigen::MatrixXf::Identity(8, 8)),
         time_since_update(0),
         hits(0),
+        age(1),
         is_confirmed(false),
         class_id(-1) {
     bbox[0] = bbox[1] = bbox[2] = bbox[3] = 0.0f;
@@ -68,6 +72,7 @@ struct Track {
         covariance(Eigen::MatrixXf::Identity(8, 8)),
         time_since_update(0),
         hits(1),
+        age(1),
         is_confirmed(false),
         class_id(cls) {
     bbox[0] = detection_bbox[0];

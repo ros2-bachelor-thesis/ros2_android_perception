@@ -90,8 +90,8 @@ namespace perception
          * Pipeline:
          * 1. YOLOv9 detection
          * 2. Filter detections (conf > threshold)
-         * 3. Deep SORT tracking
-         * 4. Generate annotated RGB (YOLO boxes + Deep SORT track IDs)
+         * 3. Deep SORT tracking (optional, controlled by enable_tracking)
+         * 4. Generate annotated RGB (YOLO boxes + track IDs if tracking enabled)
          * 5. If depth provided: generate annotated depth colormap (YOLO boxes only)
          *
          * @param bgr_data Raw BGR image buffer (interleaved, 8-bit per channel)
@@ -102,6 +102,7 @@ namespace perception
          * @param depth_height Depth image height (0 if depth_data is nullptr)
          * @param conf_threshold Confidence threshold (default: 0.5, matches Python)
          * @param iou_threshold NMS IoU threshold (default: 0.45)
+         * @param enable_tracking Enable Deep SORT tracking (default: true). Set false for camera motion scenarios.
          * @return PerceptionResult with detections, tracks, and annotated raw BGR buffers
          */
         PerceptionResult ProcessFrame(
@@ -112,7 +113,8 @@ namespace perception
             int depth_width = 0,
             int depth_height = 0,
             float conf_threshold = 0.5f,
-            float iou_threshold = 0.45f);
+            float iou_threshold = 0.45f,
+            bool enable_tracking = true);
 
         /**
          * Check if models loaded successfully

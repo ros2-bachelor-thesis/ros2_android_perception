@@ -142,6 +142,7 @@ add_library(${PROJECT_NAME} SHARED
   src/kalman_filter.cc
   src/linear_assignment.cc
   src/object_detection_controller.cc
+  src/visualization/annotator.cc
 )
 
 # Define ROS2_ANDROID_DEBUG for Debug/RelWithDebInfo builds
@@ -163,6 +164,7 @@ endif()
 target_include_directories(${PROJECT_NAME} PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<BUILD_INTERFACE:${NCNN_DIR}/install/include>
+  $<BUILD_INTERFACE:${OPENCV_INCLUDE_DIR}>
   $<INSTALL_INTERFACE:include>
 )
 

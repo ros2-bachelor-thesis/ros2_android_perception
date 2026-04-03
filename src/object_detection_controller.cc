@@ -1,9 +1,14 @@
 #include "perception/object_detection_controller.h"
 
+#include <cstring>
 #include <opencv2/opencv.hpp>
+#include <opencv2/imgproc.hpp>
 
+#include "perception/types.h"
 #include "perception/ncnn_detector.h"
 #include "perception/deep_sort_tracker.h"
+#include "perception/visualization/annotator.h"
+#include "perception/log.h"
 
 namespace perception {
 
@@ -103,6 +108,151 @@ void ObjectDetectionController::Reset() {
   // Note: To fully reset tracker state, would need to recreate tracker
   // but that requires storing model paths. For now, just clear cache.
   // Full reset can be implemented if needed by storing constructor params.
+}
+
+PerceptionResult ObjectDetectionController::ProcessFrame(
+    const uint8_t* bgr_data,
+    int width,
+    int height,
+    const float* depth_data,
+    int depth_width,
+    int depth_height,
+    float conf_threshold,
+    float iou_threshold) {
+
+  PerceptionResult result;
+
+  if (!ready_ || !bgr_data || width <= 0 || height <= 0) {
+    LOGE("ProcessFrame: Not ready or invalid input");
+    return result;
+  }
+
+  // Wrap raw BGR buffer in cv::Mat (zero-copy, internal use only)
+  cv::Mat rgb_bgr(height, width, CV_8UC3, const_cast<uint8_t*>(bgr_data));
+
+  // Wrap depth buffer in cv::Mat if provided (zero-copy, internal use only)
+  cv::Mat depth;
+  if (depth_data && depth_width > 0 && depth_height > 0) {
+    depth = cv::Mat(depth_height, depth_width, CV_32FC1,
+                    const_cast<float*>(depth_data));
+  }
+
+  // Step 1: Run YOLOv9 detector
+  auto all_detections = detector_->Detect(rgb_bgr, conf_threshold, iou_threshold);
+
+  LOGI("ProcessFrame: Got %zu detections from YOLO", all_detections.size());
+
+  // Step 2: Filter detections by confidence threshold (matches Python line 245)
+  std::vector<Detection> filtered_detections;
+  for (const auto& det : all_detections) {
+    if (det.confidence > conf_threshold) {
+      filtered_detections.push_back(det);
+    }
+  }
+
+  LOGI("ProcessFrame: %zu detections after filtering (conf > %.2f)",
+       filtered_detections.size(), conf_threshold);
+
+  // Step 3: Update Deep SORT tracker
+  auto all_tracks = tracker_->Update(rgb_bgr, filtered_detections);
+
+  LOGI("ProcessFrame: Deep SORT has %zu tracks", all_tracks.size());
+
+  // Step 4: Store detections and tracks
+  result.detections = filtered_detections;
+  result.tracks = all_tracks;
+
+  // Step 5: Generate annotated RGB visualization
+  cv::Mat annotated_rgb = rgb_bgr.clone();
+
+  visualization::Annotator annotator(2);  // line_width = 2 (matches Python)
+
+  // Fixed colors for each class (matches Python visualization)
+  cv::Scalar colors[3] = {
+    cv::Scalar(0, 255, 0),    // Green for cpb_beetle
+    cv::Scalar(0, 0, 255),    // Red for cpb_larva
+    cv::Scalar(255, 0, 0)     // Blue for cpb_eggs
+  };
+
+  // Draw YOLO detections on RGB (matches Python lines 248-249)
+  for (const auto& det : result.detections) {
+    std::string label = std::string(GetClassName(det.class_id)) +
+                       " " + std::to_string(det.confidence).substr(0, 4);
+    annotator.DrawBoundingBox(annotated_rgb, det.bbox, label,
+                              colors[det.class_id]);
+  }
+
+  // Draw Deep SORT track IDs on RGB (matches Python lines 374-381)
+  for (const auto& track : result.tracks) {
+    if (!track.is_confirmed) continue;  // Only draw confirmed tracks
+
+    // Generate color based on track_id (matches Python line 377-378)
+    int color_idx = track.track_id % 100;
+    cv::Scalar track_color(
+      (color_idx * 71) % 256,   // Simple pseudo-random color generation
+      (color_idx * 151) % 256,
+      (color_idx * 211) % 256
+    );
+
+    annotator.DrawTrackId(annotated_rgb, track.track_id, track.bbox, track_color);
+  }
+
+  // Copy annotated RGB to result (cv::Mat → std::vector)
+  result.rgb_width = annotated_rgb.cols;
+  result.rgb_height = annotated_rgb.rows;
+  size_t rgb_size = result.rgb_width * result.rgb_height * 3;
+  result.annotated_rgb_bgr.resize(rgb_size);
+  std::memcpy(result.annotated_rgb_bgr.data(), annotated_rgb.data, rgb_size);
+
+  // Step 6: Generate depth colormap visualization if depth available
+  if (!depth.empty()) {
+    result.has_depth_visualization = true;
+    cv::Mat annotated_depth = GenerateDepthColormap(depth);
+
+    // Draw YOLO detections on depth colormap (matches Python lines 268-269)
+    // NOTE: Does NOT draw track IDs, only YOLO boxes
+    for (const auto& det : result.detections) {
+      std::string label = std::string(GetClassName(det.class_id)) +
+                         " " + std::to_string(det.confidence).substr(0, 4);
+      annotator.DrawBoundingBox(annotated_depth, det.bbox, label,
+                                colors[det.class_id]);
+    }
+
+    // Copy annotated depth to result (cv::Mat → std::vector)
+    result.depth_width = annotated_depth.cols;
+    result.depth_height = annotated_depth.rows;
+    size_t depth_size = result.depth_width * result.depth_height * 3;
+    result.annotated_depth_bgr.resize(depth_size);
+    std::memcpy(result.annotated_depth_bgr.data(), annotated_depth.data, depth_size);
+  }
+
+  return result;
+}
+
+cv::Mat ObjectDetectionController::GenerateDepthColormap(const cv::Mat& depth) {
+  if (depth.empty()) {
+    return cv::Mat();
+  }
+
+  // Python code (line 150):
+  // depth_color_map = cv2.applyColorMap(cv2.convertScaleAbs(depth, alpha=100), cv2.COLORMAP_JET)
+
+  // Convert depth (32FC1, meters) to 8-bit for colormap
+  cv::Mat depth_8u;
+  cv::convertScaleAbs(depth, depth_8u, 100.0);  // alpha=100 (scale factor)
+
+  // Apply JET colormap
+  cv::Mat colormap;
+  cv::applyColorMap(depth_8u, colormap, cv::COLORMAP_JET);
+
+  return colormap;
+}
+
+const char* ObjectDetectionController::GetClassName(int class_id) {
+  if (class_id < 0 || class_id >= 3) {
+    return "unknown";
+  }
+  return CLASS_NAMES[class_id];
 }
 
 }  // namespace perception

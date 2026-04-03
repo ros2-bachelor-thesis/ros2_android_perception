@@ -8,6 +8,15 @@
 #include "perception/detection.h"
 #include "perception/track.h"
 
+// Forward declarations (full types defined in types.h, included in .cc file)
+namespace perception {
+  struct PerceptionResult;
+}
+
+namespace cv {
+  class Mat;
+}
+
 namespace perception
 {
 
@@ -76,6 +85,36 @@ namespace perception
             float iou_threshold = 0.45f);
 
         /**
+         * Process single frame with visualization
+         *
+         * Pipeline:
+         * 1. YOLOv9 detection
+         * 2. Filter detections (conf > threshold)
+         * 3. Deep SORT tracking
+         * 4. Generate annotated RGB (YOLO boxes + Deep SORT track IDs)
+         * 5. If depth provided: generate annotated depth colormap (YOLO boxes only)
+         *
+         * @param bgr_data Raw BGR image buffer (interleaved, 8-bit per channel)
+         * @param width RGB image width
+         * @param height RGB image height
+         * @param depth_data Optional depth buffer (32-bit float, meters), nullptr if not available
+         * @param depth_width Depth image width (0 if depth_data is nullptr)
+         * @param depth_height Depth image height (0 if depth_data is nullptr)
+         * @param conf_threshold Confidence threshold (default: 0.5, matches Python)
+         * @param iou_threshold NMS IoU threshold (default: 0.45)
+         * @return PerceptionResult with detections, tracks, and annotated raw BGR buffers
+         */
+        PerceptionResult ProcessFrame(
+            const uint8_t *bgr_data,
+            int width,
+            int height,
+            const float *depth_data = nullptr,
+            int depth_width = 0,
+            int depth_height = 0,
+            float conf_threshold = 0.5f,
+            float iou_threshold = 0.45f);
+
+        /**
          * Check if models loaded successfully
          */
         bool IsReady() const { return ready_; }
@@ -95,6 +134,20 @@ namespace perception
          */
         void Reset();
 
+        /**
+         * Generate depth colormap (cv2.applyColorMap equivalent)
+         * @param depth Depth image (32FC1, meters)
+         * @return BGR8 colormap image (JET colormap)
+         */
+        static cv::Mat GenerateDepthColormap(const cv::Mat &depth);
+
+        /**
+         * Get class name by ID
+         * @param class_id 0=cpb_beetle, 1=cpb_larva, 2=cpb_eggs
+         * @return Class name string
+         */
+        static const char *GetClassName(int class_id);
+
     private:
         std::unique_ptr<NcnnDetector> detector_;
         std::unique_ptr<DeepSortTracker> tracker_;
@@ -102,6 +155,13 @@ namespace perception
 
         // Cache last results
         std::vector<Track> last_confirmed_tracks_;
+
+        // Class names (matches Python model training)
+        static constexpr const char *CLASS_NAMES[3] = {
+            "cpb_beetle",  // Colorado Potato Beetle adult
+            "cpb_larva",   // larvae
+            "cpb_eggs"     // egg clusters
+        };
     };
 
 } // namespace perception

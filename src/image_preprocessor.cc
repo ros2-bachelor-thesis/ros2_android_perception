@@ -85,16 +85,27 @@ ncnn::Mat ImagePreprocessor::ToNCNN(const cv::Mat& image) {
 ncnn::Mat ImagePreprocessor::PrepareForYOLO(const cv::Mat& image,
                                              int input_width,
                                              int input_height) {
-  // Match Python reference: simple resize without letterbox (cv2.resize((1280, 736)))
-  // Python code does NOT maintain aspect ratio - it directly resizes
-  cv::Mat resized;
-  cv::resize(image, resized, cv::Size(input_width, input_height), 0, 0, cv::INTER_LINEAR);
+  // Optimized preprocessing using NCNN's from_pixels_resize
+  // Combines resize + BGR→RGB + HWC→CHW conversion in single pass
+  // Much faster than manual loops
 
-  // Step 2: Normalize and convert BGR to RGB
-  cv::Mat normalized = NormalizeAndConvertRGB(resized);
+  // NCNN expects continuous BGR data
+  cv::Mat continuous_image = image;
+  if (!image.isContinuous()) {
+    continuous_image = image.clone();
+  }
 
-  // Step 3: Convert to NCNN format (CHW)
-  ncnn::Mat ncnn_input = ToNCNN(normalized);
+  // Use NCNN's optimized from_pixels_resize (handles resize + BGR→RGB + CHW)
+  ncnn::Mat ncnn_input = ncnn::Mat::from_pixels_resize(
+      continuous_image.data,
+      ncnn::Mat::PIXEL_BGR2RGB,  // Convert BGR to RGB during load
+      image.cols, image.rows,    // Source dimensions
+      input_width, input_height  // Target dimensions
+  );
+
+  // Normalize to [0, 1] (1/255.0 scale)
+  const float norm_vals[3] = {1.0f / 255.0f, 1.0f / 255.0f, 1.0f / 255.0f};
+  ncnn_input.substract_mean_normalize(nullptr, norm_vals);
 
   return ncnn_input;
 }

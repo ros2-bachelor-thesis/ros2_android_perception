@@ -2,6 +2,7 @@
 #include "perception/image_preprocessor.h"
 #include "perception/nms.h"
 #include "perception/log.h"
+#include <chrono>
 #include <ncnn/net.h>
 
 namespace perception {
@@ -23,11 +24,18 @@ NcnnDetector::~NcnnDetector() {
 
 bool NcnnDetector::LoadModel(const std::string& param_path,
                                const std::string& bin_path) {
-  // Configure NCNN options
+  // Configure NCNN options for performance
   ncnn::Option opt;
-  opt.lightmode = true;  // Reduce memory usage
-  opt.num_threads = 4;   // Use 4 threads for ARM big.LITTLE
+  opt.lightmode = false;      // Disable light mode for better performance (trades memory for speed)
+  opt.num_threads = 8;        // Increase from 4 to 8 for modern ARM SoCs
   opt.use_vulkan_compute = use_vulkan_;
+
+  // Enable FP16 arithmetic if Vulkan is available (significantly faster on mobile GPUs)
+  if (use_vulkan_) {
+    opt.use_fp16_arithmetic = true;
+    opt.use_fp16_storage = true;
+    LOGI("NCNN: Vulkan FP16 optimizations enabled");
+  }
 
   net_.opt = opt;
 
@@ -55,7 +63,11 @@ std::vector<Detection> NcnnDetector::Detect(const cv::Mat& image,
   int img_height = image.rows;
 
   // Preprocess: simple resize (no letterbox) to match Python reference
+  auto preprocess_start = std::chrono::high_resolution_clock::now();
   ncnn::Mat input = ImagePreprocessor::PrepareForYOLO(image, input_width_, input_height_);
+  auto preprocess_end = std::chrono::high_resolution_clock::now();
+  double preprocess_ms = std::chrono::duration<double, std::milli>(preprocess_end - preprocess_start).count();
+  LOGD("NCNN preprocessing: %.1f ms", preprocess_ms);
 
   // Python uses letterbox-style coordinate scaling even with simple resize:
   // gain = min(model_h / orig_h, model_w / orig_w)
@@ -70,30 +82,32 @@ std::vector<Detection> NcnnDetector::Detect(const cv::Mat& image,
 
   // Create NCNN extractor
   ncnn::Extractor ex = net_.create_extractor();
-  ex.set_light_mode(true);
+  ex.set_light_mode(false);  // Match net_.opt.lightmode for consistency
   // Note: num_threads is set via net_.opt, not extractor
 
   // Input image
   ex.input(input_layer_, input);
 
   // Run inference - YOLOv9 has dual detection heads (out0, out1)
+  auto inference_start = std::chrono::high_resolution_clock::now();
   ncnn::Mat out0, out1;
   int ret0 = ex.extract("out0", out0);
   int ret1 = ex.extract("out1", out1);
+  auto inference_end = std::chrono::high_resolution_clock::now();
+  double inference_ms = std::chrono::duration<double, std::milli>(inference_end - inference_start).count();
+  LOGD("NCNN inference: %.1f ms", inference_ms);
 
   if (ret0 != 0 || ret1 != 0) {
     LOGE("Inference failed! ret0=%d, ret1=%d", ret0, ret1);
     return {};
   }
 
-  LOGI("NCNN output shapes: out0=[c=%d, h=%d, w=%d] (dims=%d), out1=[c=%d, h=%d, w=%d] (dims=%d)",
-       out0.c, out0.h, out0.w, out0.dims, out1.c, out1.h, out1.w, out1.dims);
-
-  // Log first few values from out0 for debugging
-  if (out0.total() > 7) {
-    const float* data0 = (const float*)out0.data;
-    LOGD("out0 first 7 values: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f, %.3f]",
-         data0[0], data0[1], data0[2], data0[3], data0[4], data0[5], data0[6]);
+  // Log output shapes only once for debugging (not on every frame)
+  static bool logged_shapes = false;
+  if (!logged_shapes) {
+    LOGI("NCNN output shapes: out0=[c=%d, h=%d, w=%d] (dims=%d), out1=[c=%d, h=%d, w=%d] (dims=%d)",
+         out0.c, out0.h, out0.w, out0.dims, out1.c, out1.h, out1.w, out1.dims);
+    logged_shapes = true;
   }
 
   // Check output format and reshape if needed
@@ -103,11 +117,18 @@ std::vector<Detection> NcnnDetector::Detect(const cv::Mat& image,
   //   - 2D transposed: [h=7, w=num_anchors] (needs transpose)
   //   - 3D: [c=1, h=num_anchors, w=7] (flatten to 2D)
 
+  auto postprocess_start = std::chrono::high_resolution_clock::now();
   ncnn::Mat output;
+
+  // Cache format detection (log only once)
+  static bool logged_format = false;
 
   // Case 1: 3D tensor [1, N, 7] - flatten to 2D
   if (out0.dims == 3 && out0.c == 1) {
-    LOGI("Detected 3D format [c=1, h=%d, w=%d], flattening to 2D", out0.h, out0.w);
+    if (!logged_format) {
+      LOGI("Detected 3D format [c=1, h=%d, w=%d], flattening to 2D", out0.h, out0.w);
+      logged_format = true;
+    }
     // Reshape both heads to 2D
     ncnn::Mat out0_2d(out0.w, out0.h);  // [h, w]
     memcpy(out0_2d.data, out0.data, out0.total() * sizeof(float));
@@ -123,7 +144,10 @@ std::vector<Detection> NcnnDetector::Detect(const cv::Mat& image,
   }
   // Case 2: 2D tensor needs transpose [7, N] → [N, 7]
   else if (out0.dims == 2 && out0.h == (4 + num_classes_)) {
-    LOGI("Detected transposed format [h=%d, w=%d], transposing", out0.h, out0.w);
+    if (!logged_format) {
+      LOGI("Detected transposed format [h=%d, w=%d], transposing", out0.h, out0.w);
+      logged_format = true;
+    }
     // Transpose: out0[h=7, w=N] → [N, 7]
     int N0 = out0.w;
     int N1 = out1.w;
@@ -147,7 +171,10 @@ std::vector<Detection> NcnnDetector::Detect(const cv::Mat& image,
   }
   // Case 3: Already correct 2D format [N, 7]
   else if (out0.dims == 2 && out0.w == (4 + num_classes_)) {
-    LOGI("Correct 2D format [h=%d, w=%d], concatenating", out0.h, out0.w);
+    if (!logged_format) {
+      LOGI("Correct 2D format [h=%d, w=%d], concatenating", out0.h, out0.w);
+      logged_format = true;
+    }
     int total_anchors = out0.h + out1.h;
     int num_values = out0.w;
 
@@ -175,8 +202,6 @@ std::vector<Detection> NcnnDetector::Detect(const cv::Mat& image,
     return {};
   }
 
-  LOGI("NCNN concatenated output: [%d x %d]", output.h, output.w);
-
   // Parse output tensor to detections (with letterbox-style scaling)
   std::vector<Detection> detections = ParseOutput(
       output,
@@ -187,20 +212,12 @@ std::vector<Detection> NcnnDetector::Detect(const cv::Mat& image,
       pad_h,
       conf_threshold);
 
-  size_t raw_count = detections.size();
-  LOGI("NCNN raw detections: %zu (before NMS, conf>%.2f)", raw_count, conf_threshold);
-
-  if (raw_count > 0) {
-    const auto& det = detections[0];
-    LOGI("NCNN first detection: bbox=[%.1f,%.1f,%.1f,%.1f] conf=%.3f class=%d",
-         det.bbox[0], det.bbox[1], det.bbox[2], det.bbox[3],
-         det.confidence, det.class_id);
-  }
-
   // Apply class-aware NMS
   detections = NMS::ApplyPerClass(detections, iou_threshold);
 
-  LOGI("NCNN detections after NMS: %zu", detections.size());
+  auto postprocess_end = std::chrono::high_resolution_clock::now();
+  double postprocess_ms = std::chrono::duration<double, std::milli>(postprocess_end - postprocess_start).count();
+  LOGD("NCNN postprocess (format+parse+NMS): %.1f ms", postprocess_ms);
 
   return detections;
 }

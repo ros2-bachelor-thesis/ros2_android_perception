@@ -31,8 +31,8 @@ struct Track {
   Eigen::MatrixXf covariance;
 
   /**
-   * Smoothed appearance feature (512-dim from OSNet-AIN)
-   * Updated as exponential moving average of detection features
+   * Latest appearance feature (512-dim from OSNet-AIN)
+   * Raw features stored in gallery for nearest-neighbor matching
    */
   std::vector<float> feature;
 
@@ -51,6 +51,12 @@ struct Track {
    */
   bool is_confirmed;
 
+  /**
+   * Track deletion flag (Python parity: TrackState.Deleted)
+   * Set by MarkMissed() for tentative tracks or confirmed tracks exceeding max_age
+   */
+  bool is_deleted;
+
   /** Class ID inherited from detection: 0=cpb_beetle, 1=cpb_larva, 2=cpb_eggs */
   int class_id;
 
@@ -62,6 +68,7 @@ struct Track {
         hits(0),
         age(1),
         is_confirmed(false),
+        is_deleted(false),
         class_id(-1) {
     bbox[0] = bbox[1] = bbox[2] = bbox[3] = 0.0f;
   }
@@ -74,6 +81,7 @@ struct Track {
         hits(1),
         age(1),
         is_confirmed(false),
+        is_deleted(false),
         class_id(cls) {
     bbox[0] = detection_bbox[0];
     bbox[1] = detection_bbox[1];
@@ -85,7 +93,7 @@ struct Track {
     float cy = (detection_bbox[1] + detection_bbox[3]) / 2.0f;
     float w = detection_bbox[2] - detection_bbox[0];
     float h = detection_bbox[3] - detection_bbox[1];
-    float a = w / h;  // aspect ratio
+    float a = (h > 0.0f) ? (w / h) : 1.0f;
 
     state(0) = cx;  // x
     state(1) = cy;  // y

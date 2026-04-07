@@ -37,7 +37,6 @@ namespace perception
     if (detections.empty())
     {
       Predict();
-      // Mark all tracks as missed (time_since_update++)
       for (size_t i = 0; i < tracks_.size(); i++)
       {
         MarkMissed(i);
@@ -125,7 +124,8 @@ namespace perception
     {
       kf_.Predict(track.state, track.covariance);
       track.UpdateBboxFromState();
-      track.age += 1; // Increment age counter (Python parity - track.py line 123)
+      track.age += 1;              // Python parity - track.py line 123
+      track.time_since_update += 1; // Python parity - track.py line 124
     }
   }
 
@@ -163,6 +163,7 @@ namespace perception
 
     std::vector<std::pair<int, int>> matches;
     std::vector<int> unmatched_detections = detection_indices;
+    MatchResult cascade_result;
 
     // Stage 1: Cascade matching on confirmed tracks (appearance-based)
     if (!confirmed_tracks.empty() && !detections.empty())
@@ -177,7 +178,7 @@ namespace perception
           track_indices, detection_indices);
 
       // Run cascade matching
-      auto cascade_result = LinearAssignment::MatchingCascade(
+      cascade_result = LinearAssignment::MatchingCascade(
           cost_matrix, config_.max_cosine_distance, config_.max_age,
           tracks_, confirmed_tracks, unmatched_detections);
 
@@ -185,27 +186,29 @@ namespace perception
       unmatched_detections = cascade_result.unmatched_detections;
     }
 
-    // Stage 2: IoU matching for unconfirmed tracks + unmatched confirmed tracks
+    // Stage 2: IoU matching for unconfirmed tracks + cascade-unmatched confirmed with TSU==1
+    // Python parity (tracker.py:118-123):
+    //   iou_track_candidates = unconfirmed_tracks + [k for k in unmatched_tracks_a if tracks[k].time_since_update == 1]
+    //   unmatched_tracks_a = [k for k in unmatched_tracks_a if tracks[k].time_since_update != 1]
     if (!unmatched_detections.empty())
     {
-      // Collect remaining tracks
       std::vector<int> iou_track_candidates = unconfirmed_tracks;
-      for (size_t i = 0; i < tracks_.size(); i++)
+      for (int idx : cascade_result.unmatched_tracks)
       {
-        if (tracks_[i].is_confirmed && tracks_[i].time_since_update == 1)
+        if (tracks_[idx].time_since_update == 1)
         {
-          iou_track_candidates.push_back(i);
+          iou_track_candidates.push_back(idx);
         }
       }
 
       if (!iou_track_candidates.empty())
       {
-        // Build IoU cost matrix
+        // Build IoU cost matrix (locally indexed: rows=0..N-1, cols=0..M-1)
         Eigen::MatrixXf iou_cost = LinearAssignment::IoUCostMatrix(
             tracks_, detections, iou_track_candidates, unmatched_detections);
 
-        // Match using IoU
-        auto iou_result = LinearAssignment::MinCostMatching(
+        // Match using IoU with local indexing
+        auto iou_result = LinearAssignment::MinCostMatchingLocal(
             iou_cost, config_.max_iou_distance,
             iou_track_candidates, unmatched_detections);
 
@@ -228,7 +231,7 @@ namespace perception
     float cy = (detection.bbox[1] + detection.bbox[3]) / 2.0f;
     float w = detection.bbox[2] - detection.bbox[0];
     float h = detection.bbox[3] - detection.bbox[1];
-    float a = w / h;
+    float a = (h > 0.0f) ? (w / h) : 1.0f;
 
     float measurement[4] = {cx, cy, a, h};
 
@@ -238,25 +241,15 @@ namespace perception
     // Update bbox from state
     track.UpdateBboxFromState();
 
-    // Update feature (exponential moving average)
+    // Python parity (track.py:140): self.features.append(detection.feature)
+    // Store raw features in gallery for nearest-neighbor matching (no EMA)
     if (!detection.feature.empty())
     {
-      if (track.feature.empty())
-      {
-        track.feature = detection.feature;
-      }
-      else
-      {
-        // EMA: feature = 0.9 * feature + 0.1 * new_feature
-        for (size_t i = 0; i < track.feature.size() && i < detection.feature.size(); i++)
-        {
-          track.feature[i] = 0.9f * track.feature[i] + 0.1f * detection.feature[i];
-        }
-      }
-
-      // Add to gallery (limit by nn_budget)
+      track.feature = detection.feature; // Keep latest for reference
       gallery_[track.track_id].push_back(detection.feature);
-      if (gallery_[track.track_id].size() > static_cast<size_t>(config_.nn_budget))
+      // Trim gallery if budget is set (nn_budget <= 0 means unlimited, matching Python nn_budget=None)
+      if (config_.nn_budget > 0 &&
+          gallery_[track.track_id].size() > static_cast<size_t>(config_.nn_budget))
       {
         gallery_[track.track_id].erase(gallery_[track.track_id].begin());
       }
@@ -276,7 +269,18 @@ namespace perception
   void DeepSortTracker::MarkMissed(int track_idx)
   {
     Track &track = tracks_[track_idx];
-    track.time_since_update += 1;
+    // Python parity (track.py:147-153): predict() already incremented TSU,
+    // mark_missed() only sets state to Deleted
+    if (!track.is_confirmed)
+    {
+      // Tentative tracks deleted immediately on first miss
+      track.is_deleted = true;
+    }
+    else if (track.time_since_update > config_.max_age)
+    {
+      // Confirmed tracks deleted after exceeding max_age
+      track.is_deleted = true;
+    }
   }
 
   void DeepSortTracker::InitiateTrack(const Detection &detection)
@@ -288,7 +292,7 @@ namespace perception
     float cy = (detection.bbox[1] + detection.bbox[3]) / 2.0f;
     float w = detection.bbox[2] - detection.bbox[0];
     float h = detection.bbox[3] - detection.bbox[1];
-    float a = w / h;
+    float a = (h > 0.0f) ? (w / h) : 1.0f;
 
     float measurement[4] = {cx, cy, a, h};
     kf_.Initiate(measurement, track.state, track.covariance);
@@ -305,20 +309,17 @@ namespace perception
 
   void DeepSortTracker::DeleteOldTracks()
   {
+    // Python parity (tracker.py:79): self.tracks = [t for t in self.tracks if not t.is_deleted()]
     tracks_.erase(
         std::remove_if(tracks_.begin(), tracks_.end(),
                        [this](const Track &t)
                        {
-                         // Use different thresholds for tentative vs confirmed tracks
-                         // Tentative: delete after 1 frame (prevents accumulation)
-                         // Confirmed: delete after max_age frames (survives occlusions)
-                         int max_age = t.is_confirmed ? config_.max_age : 1;
-                         bool should_delete = t.time_since_update > max_age;
-                         if (should_delete)
+                         if (t.is_deleted)
                          {
                            gallery_.erase(t.track_id);
+                           return true;
                          }
-                         return should_delete;
+                         return false;
                        }),
         tracks_.end());
   }

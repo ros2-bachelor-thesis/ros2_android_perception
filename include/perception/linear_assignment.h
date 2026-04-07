@@ -46,6 +46,19 @@ class LinearAssignment {
       const std::vector<int>& detection_indices);
 
   /**
+   * Min cost matching with locally-indexed cost matrix
+   *
+   * Unlike MinCostMatching, the cost matrix rows/cols are 0-indexed (local),
+   * not indexed by track_indices/detection_indices values. Used when the cost
+   * matrix was built specifically for the given subset (e.g., IoU matching).
+   */
+  static MatchResult MinCostMatchingLocal(
+      const Eigen::MatrixXf& cost_matrix,
+      float max_distance,
+      const std::vector<int>& track_indices,
+      const std::vector<int>& detection_indices);
+
+  /**
    * Cascade matching strategy from Deep SORT
    *
    * Prioritizes recently seen tracks by running matching at different

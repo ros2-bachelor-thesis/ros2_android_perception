@@ -77,13 +77,12 @@ namespace perception
 
     // Load Deep SORT tracker (includes ReID model)
     DeepSortConfig config;
-    // Relaxed thresholds to handle camera motion (handheld Android device)
-    // When camera moves, Kalman predictions drift and matching becomes harder
-    config.max_cosine_distance = 0.5f; // ReID appearance matching (relaxed from 0.4 for camera motion)
-    config.nn_budget = 100;            // Feature gallery size (Android memory constraint)
-    config.max_age = 20;               // Delete lost tracks (increased from 15 to survive brief occlusions during motion)
-    config.n_init = 3;                 // Min consecutive hits to confirm track
-    config.max_iou_distance = 0.7f;    // IoU fallback matching (primary method for motion compensation)
+    // Match Python reference exactly (object_detection.py + tracker.py defaults)
+    config.max_cosine_distance = 0.4f; // Python: max_cosine_distance=0.4
+    config.nn_budget = -1;             // Python: nn_budget=None (unlimited)
+    config.max_age = 30;               // Python: max_age=30
+    config.n_init = 3;                 // Python: n_init=3
+    config.max_iou_distance = 0.7f;    // Python: max_iou_distance=0.7
 
     tracker_ = std::make_unique<DeepSortTracker>(
         reid_param, reid_bin, config);
@@ -243,8 +242,9 @@ namespace perception
       int confirmed_count = 0;
       for (const auto &track : result.tracks)
       {
-        if (!track.is_confirmed)
-          continue; // Skip tentative tracks
+        // Python parity: only draw confirmed tracks matched this frame
+        if (!track.is_confirmed || track.time_since_update > 0)
+          continue;
 
         confirmed_count++;
 
@@ -295,8 +295,8 @@ namespace perception
         // Draw only confirmed Deep SORT tracks on depth colormap
         for (const auto &track : result.tracks)
         {
-          if (!track.is_confirmed)
-            continue; // Skip tentative tracks
+          if (!track.is_confirmed || track.time_since_update > 0)
+            continue;
 
           // Label format: "cpb_beetle ID: 5"
           std::string label = std::string(GetClassName(track.class_id)) +

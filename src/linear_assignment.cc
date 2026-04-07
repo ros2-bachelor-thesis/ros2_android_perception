@@ -5,40 +5,82 @@
 
 namespace perception {
 
-// Simple greedy assignment as Hungarian alternative (faster, near-optimal for tracking)
+// Optimal O(n^3) Hungarian (Kuhn-Munkres) algorithm
+// Matches scipy.optimize.linear_sum_assignment used in Python Deep SORT
 std::vector<std::pair<int, int>> LinearAssignment::Hungarian(
     const Eigen::MatrixXf& cost_matrix) {
   int rows = cost_matrix.rows();
   int cols = cost_matrix.cols();
 
-  std::vector<std::pair<int, int>> assignments;
-  std::set<int> assigned_rows;
-  std::set<int> assigned_cols;
+  if (rows == 0 || cols == 0) {
+    return {};
+  }
 
-  // Greedy assignment: repeatedly find minimum cost unassigned pair
-  while (assigned_rows.size() < rows && assigned_cols.size() < cols) {
-    float min_cost = std::numeric_limits<float>::max();
-    int best_row = -1;
-    int best_col = -1;
+  // Pad to square matrix (algorithm requires square)
+  // Pad with INFTY_COST so dummy assignments are never preferred over real ones
+  int n = std::max(rows, cols);
+  Eigen::MatrixXf C = Eigen::MatrixXf::Constant(n, n, INFTY_COST);
+  for (int i = 0; i < rows; i++) {
+    for (int j = 0; j < cols; j++) {
+      C(i, j) = cost_matrix(i, j);
+    }
+  }
 
-    // Find minimum unassigned cost
-    for (int r = 0; r < rows; r++) {
-      if (assigned_rows.count(r)) continue;
-      for (int c = 0; c < cols; c++) {
-        if (assigned_cols.count(c)) continue;
-        if (cost_matrix(r, c) < min_cost) {
-          min_cost = cost_matrix(r, c);
-          best_row = r;
-          best_col = c;
+  // u[i], v[j] = potentials for row i and column j
+  std::vector<float> u(n + 1, 0.0f), v(n + 1, 0.0f);
+  // p[j] = row assigned to column j, way[j] = predecessor column
+  std::vector<int> p(n + 1, 0), way(n + 1, 0);
+
+  for (int i = 1; i <= n; i++) {
+    p[0] = i;
+    int j0 = 0;
+    std::vector<float> minv(n + 1, std::numeric_limits<float>::max());
+    std::vector<bool> used(n + 1, false);
+
+    do {
+      used[j0] = true;
+      int i0 = p[j0], j1 = 0;
+      float delta = std::numeric_limits<float>::max();
+
+      for (int j = 1; j <= n; j++) {
+        if (!used[j]) {
+          float cur = C(i0 - 1, j - 1) - u[i0] - v[j];
+          if (cur < minv[j]) {
+            minv[j] = cur;
+            way[j] = j0;
+          }
+          if (minv[j] < delta) {
+            delta = minv[j];
+            j1 = j;
+          }
         }
       }
+
+      for (int j = 0; j <= n; j++) {
+        if (used[j]) {
+          u[p[j]] += delta;
+          v[j] -= delta;
+        } else {
+          minv[j] -= delta;
+        }
+      }
+
+      j0 = j1;
+    } while (p[j0] != 0);
+
+    do {
+      int j1 = way[j0];
+      p[j0] = p[j1];
+      j0 = j1;
+    } while (j0);
+  }
+
+  // Extract assignments (only for original rows/cols)
+  std::vector<std::pair<int, int>> assignments;
+  for (int j = 1; j <= n; j++) {
+    if (p[j] > 0 && p[j] <= rows && j <= cols) {
+      assignments.push_back({p[j] - 1, j - 1});
     }
-
-    if (best_row == -1) break;  // No more valid assignments
-
-    assignments.push_back({best_row, best_col});
-    assigned_rows.insert(best_row);
-    assigned_cols.insert(best_col);
   }
 
   return assignments;
@@ -112,6 +154,66 @@ MatchResult LinearAssignment::MinCostMatching(
   return result;
 }
 
+MatchResult LinearAssignment::MinCostMatchingLocal(
+    const Eigen::MatrixXf& cost_matrix,
+    float max_distance,
+    const std::vector<int>& track_indices,
+    const std::vector<int>& detection_indices) {
+
+  MatchResult result;
+
+  if (track_indices.empty() || detection_indices.empty()) {
+    result.unmatched_tracks = track_indices;
+    result.unmatched_detections = detection_indices;
+    return result;
+  }
+
+  int num_tracks = track_indices.size();
+  int num_detections = detection_indices.size();
+
+  // Cost matrix is already locally indexed (rows=0..N-1, cols=0..M-1)
+  // Mask costs exceeding threshold
+  Eigen::MatrixXf masked_cost(num_tracks, num_detections);
+  for (int i = 0; i < num_tracks; i++) {
+    for (int j = 0; j < num_detections; j++) {
+      float cost = cost_matrix(i, j);
+      masked_cost(i, j) = (cost > max_distance) ? INFTY_COST : cost;
+    }
+  }
+
+  auto assignments = Hungarian(masked_cost);
+
+  std::set<int> matched_track_idx;
+  std::set<int> matched_detection_idx;
+
+  for (const auto& [row, col] : assignments) {
+    if (masked_cost(row, col) > max_distance) {
+      continue;
+    }
+
+    int track_idx = track_indices[row];
+    int detection_idx = detection_indices[col];
+
+    result.matches.push_back({track_idx, detection_idx});
+    matched_track_idx.insert(track_idx);
+    matched_detection_idx.insert(detection_idx);
+  }
+
+  for (int idx : track_indices) {
+    if (!matched_track_idx.count(idx)) {
+      result.unmatched_tracks.push_back(idx);
+    }
+  }
+
+  for (int idx : detection_indices) {
+    if (!matched_detection_idx.count(idx)) {
+      result.unmatched_detections.push_back(idx);
+    }
+  }
+
+  return result;
+}
+
 MatchResult LinearAssignment::MatchingCascade(
     const Eigen::MatrixXf& cost_matrix,
     float max_distance,
@@ -124,16 +226,17 @@ MatchResult LinearAssignment::MatchingCascade(
   std::vector<int> unmatched_detections = detection_indices;
 
   // Cascade matching: prioritize tracks by time_since_update
+  // Python parity (linear_assignment.py:124-139)
   for (int level = 0; level < cascade_depth; level++) {
     if (unmatched_detections.empty()) {
       break;
     }
 
     // Find tracks at this cascade level
-    // Python uses: time_since_update == 1 + level (level 0 = tracks updated last frame)
+    // Python: tracks[k].time_since_update == 1 + level
     std::vector<int> level_track_indices;
     for (int idx : track_indices) {
-      if (tracks[idx].time_since_update == level + 1) {
+      if (tracks[idx].time_since_update == 1 + level) {
         level_track_indices.push_back(idx);
       }
     }
@@ -152,18 +255,18 @@ MatchResult LinearAssignment::MatchingCascade(
                           level_result.matches.begin(),
                           level_result.matches.end());
 
-    // Accumulate unmatched tracks
-    result.unmatched_tracks.insert(result.unmatched_tracks.end(),
-                                    level_result.unmatched_tracks.begin(),
-                                    level_result.unmatched_tracks.end());
-
     // Remove matched detections from pool for next level
     unmatched_detections = level_result.unmatched_detections;
   }
 
-  // Any remaining tracks that weren't at any level
+  // Python parity (linear_assignment.py:140):
+  // unmatched_tracks = list(set(track_indices) - set(k for k, _ in matches))
+  std::set<int> matched_track_set;
+  for (const auto& [t, d] : result.matches) {
+    matched_track_set.insert(t);
+  }
   for (int idx : track_indices) {
-    if (tracks[idx].time_since_update >= cascade_depth) {
+    if (!matched_track_set.count(idx)) {
       result.unmatched_tracks.push_back(idx);
     }
   }
@@ -193,7 +296,7 @@ void LinearAssignment::GateCostMatrix(
     float cy = (det.bbox[1] + det.bbox[3]) / 2.0f;
     float w = det.bbox[2] - det.bbox[0];
     float h = det.bbox[3] - det.bbox[1];
-    float a = w / h;  // aspect ratio
+    float a = (h > 0.0f) ? (w / h) : 1.0f;
 
     measurements(i, 0) = cx;
     measurements(i, 1) = cy;
@@ -256,12 +359,6 @@ Eigen::MatrixXf LinearAssignment::IoUCostMatrix(
     for (int j = 0; j < num_detections; j++) {
       const Track& track = tracks[track_indices[i]];
       const Detection& det = detections[detection_indices[j]];
-
-      // Python: Only IoU-match tracks updated within last frame (time_since_update <= 1)
-      if (track.time_since_update > 1) {
-        cost_matrix(i, j) = INFTY_COST;
-        continue;
-      }
 
       float iou = CalculateIoU(track.bbox, det.bbox);
       cost_matrix(i, j) = 1.0f - iou;  // Cost = 1 - IoU

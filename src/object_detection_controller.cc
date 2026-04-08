@@ -49,8 +49,9 @@ namespace perception
       : ready_(false)
   {
 
-    // Auto-detect Vulkan support if requested
-    bool vulkan_enabled = use_vulkan && HasVulkanSupport();
+    // Disable Vulkan for 352x640 model - non-standard dimensions cause
+    // Vulkan shader crashes (BinaryOp_vulkan SIGSEGV). CPU+NEON is sufficient.
+    bool vulkan_enabled = false;
 
     if (use_vulkan && !vulkan_enabled)
     {
@@ -187,6 +188,16 @@ namespace perception
     // Wrap raw BGR buffer in cv::Mat (zero-copy, internal use only)
     cv::Mat rgb_bgr(height, width, CV_8UC3, const_cast<uint8_t *>(bgr_data));
 
+    // Match Python preprocessing (object_detection.py yolov9 branch lines 224-226):
+    //   img = cv2.resize(self.rgb_image, (640, 360))  # color_depth_size
+    //   img = img[4:-4,:]                              # crop to 640x352
+    //   im0 = img.copy()                               # detection space = 640x352
+    // NCNN model expects 1280x736, so we pass the 640x352 image and NCNN
+    // resizes internally. Detections are then scaled back to 640x352 (im0 space).
+    cv::Mat resized;
+    cv::resize(rgb_bgr, resized, cv::Size(640, 360));
+    cv::Mat model_input = resized(cv::Rect(0, 4, 640, 352)).clone();
+
     // Wrap depth buffer in cv::Mat if provided (zero-copy, internal use only)
     cv::Mat depth;
     if (depth_data && depth_width > 0 && depth_height > 0)
@@ -196,8 +207,10 @@ namespace perception
     }
 
     // Step 1: Run YOLOv9 detector
+    // NCNN internally resizes 640x352 -> 1280x736, then scale_boxes maps
+    // detections back to model_input size (640x352) via gain/pad math.
     auto detect_start = std::chrono::high_resolution_clock::now();
-    auto all_detections = detector_->Detect(rgb_bgr, conf_threshold, iou_threshold);
+    auto all_detections = detector_->Detect(model_input, conf_threshold, iou_threshold);
     auto detect_end = std::chrono::high_resolution_clock::now();
     double detect_ms = std::chrono::duration<double, std::milli>(detect_end - detect_start).count();
 
@@ -208,7 +221,7 @@ namespace perception
     if (enable_tracking)
     {
       auto track_start = std::chrono::high_resolution_clock::now();
-      all_tracks = tracker_->Update(rgb_bgr, all_detections);
+      all_tracks = tracker_->Update(model_input, all_detections);
       auto track_end = std::chrono::high_resolution_clock::now();
       double track_ms = std::chrono::duration<double, std::milli>(track_end - track_start).count();
 
@@ -225,7 +238,8 @@ namespace perception
     result.tracks = all_tracks;
 
     // Step 5: Generate annotated RGB visualization
-    cv::Mat annotated_rgb = rgb_bgr.clone();
+    // Detections are in model_input_size space (640x352), so annotate on that
+    cv::Mat annotated_rgb = model_input.clone();
 
     visualization::Annotator annotator(2); // line_width = 2 (matches Python)
 

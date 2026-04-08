@@ -12,8 +12,8 @@ NcnnDetector::NcnnDetector(const std::string& param_path,
                            bool use_vulkan)
     : loaded_(false),
       use_vulkan_(use_vulkan),
-      input_width_(1280),
-      input_height_(736),
+      input_width_(640),
+      input_height_(352),
       num_classes_(3) {
   loaded_ = LoadModel(param_path, bin_path);
 }

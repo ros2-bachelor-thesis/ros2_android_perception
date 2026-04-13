@@ -177,7 +177,7 @@ namespace perception
 
     std::vector<Track> tracks_;                              ///< Active tracks
     std::map<int, std::vector<std::vector<float>>> gallery_; ///< Feature gallery per track
-    int next_id_;                                            ///< Next confirmed track ID to assign
+    int next_id_[3];                                         ///< Next confirmed track ID per class (0=beetle, 1=larva, 2=eggs)
     int next_tentative_id_;                                  ///< Next tentative track ID (negative)
 
     KalmanFilter kf_;                ///< Kalman filter instance

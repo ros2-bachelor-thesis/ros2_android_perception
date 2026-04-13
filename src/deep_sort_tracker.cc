@@ -14,7 +14,7 @@ namespace perception
   DeepSortTracker::DeepSortTracker(const std::string &reid_param,
                                    const std::string &reid_bin,
                                    const DeepSortConfig &config)
-      : next_id_(1), next_tentative_id_(1), config_(config)
+      : next_id_{1, 1, 1}, next_tentative_id_(1), config_(config)
   {
     reid_ = std::make_unique<NcnnReID>(reid_param, reid_bin);
   }
@@ -267,7 +267,7 @@ namespace perception
     if (!track.is_confirmed && track.ShouldConfirm(config_.n_init))
     {
       int old_id = track.track_id;
-      track.track_id = next_id_++;
+      track.track_id = next_id_[track.class_id]++;
       track.is_confirmed = true;
       // Migrate gallery from tentative ID to confirmed ID
       if (gallery_.count(old_id))
@@ -328,7 +328,7 @@ namespace perception
   {
     tracks_.clear();
     gallery_.clear();
-    next_id_ = 1;
+    next_id_[0] = next_id_[1] = next_id_[2] = 1;
     next_tentative_id_ = 1;
   }
 

@@ -4,6 +4,9 @@
 #include <algorithm>
 #include <cmath>
 #include <set>
+#ifdef __ARM_NEON
+#include <arm_neon.h>
+#endif
 
 namespace perception
 {
@@ -11,7 +14,7 @@ namespace perception
   DeepSortTracker::DeepSortTracker(const std::string &reid_param,
                                    const std::string &reid_bin,
                                    const DeepSortConfig &config)
-      : next_id_(1), config_(config)
+      : next_id_(1), next_tentative_id_(1), config_(config)
   {
     reid_ = std::make_unique<NcnnReID>(reid_param, reid_bin);
   }
@@ -256,13 +259,24 @@ namespace perception
     }
 
     // Update track state
+    track.confidence = detection.confidence;
     track.time_since_update = 0;
     track.hits += 1;
 
-    // Confirm track if criteria met
+    // Confirm track if criteria met - assign real ID on confirmation
     if (!track.is_confirmed && track.ShouldConfirm(config_.n_init))
     {
+      int old_id = track.track_id;
+      track.track_id = next_id_++;
       track.is_confirmed = true;
+      // Migrate gallery from tentative ID to confirmed ID
+      if (gallery_.count(old_id))
+      {
+        gallery_[track.track_id] = std::move(gallery_[old_id]);
+        gallery_.erase(old_id);
+      }
+      LOGI("Track confirmed: tentative_id=%d -> confirmed_id=%d (hits=%d)",
+           old_id, track.track_id, track.hits);
     }
   }
 
@@ -285,7 +299,10 @@ namespace perception
 
   void DeepSortTracker::InitiateTrack(const Detection &detection)
   {
-    Track track(next_id_++, detection.bbox, detection.class_id);
+    // Use negative temporary ID for tentative tracks. Real ID assigned on confirmation.
+    // This prevents ID counter inflation from short-lived false detections.
+    Track track(-(next_tentative_id_++), detection.bbox, detection.class_id);
+    track.confidence = detection.confidence;
 
     // Initialize Kalman filter
     float cx = (detection.bbox[0] + detection.bbox[2]) / 2.0f;
@@ -305,6 +322,14 @@ namespace perception
     }
 
     tracks_.push_back(track);
+  }
+
+  void DeepSortTracker::Reset()
+  {
+    tracks_.clear();
+    gallery_.clear();
+    next_id_ = 1;
+    next_tentative_id_ = 1;
   }
 
   void DeepSortTracker::DeleteOldTracks()
@@ -368,10 +393,26 @@ namespace perception
 
     // Compute dot product (features should be L2-normalized)
     float dot = 0.0f;
+#ifdef __ARM_NEON
+    size_t i = 0;
+    float32x4_t sum = vdupq_n_f32(0.0f);
+    for (; i + 4 <= f1.size(); i += 4)
+    {
+      float32x4_t a = vld1q_f32(&f1[i]);
+      float32x4_t b = vld1q_f32(&f2[i]);
+      sum = vfmaq_f32(sum, a, b);
+    }
+    dot = vaddvq_f32(sum);
+    for (; i < f1.size(); i++)
+    {
+      dot += f1[i] * f2[i];
+    }
+#else
     for (size_t i = 0; i < f1.size(); i++)
     {
       dot += f1[i] * f2[i];
     }
+#endif
 
     // Cosine distance = 1 - similarity
     return 1.0f - dot;

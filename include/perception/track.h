@@ -60,6 +60,9 @@ struct Track {
   /** Class ID inherited from detection: 0=cpb_beetle, 1=cpb_larva, 2=cpb_eggs */
   int class_id;
 
+  /** Confidence from the latest matched detection */
+  float confidence;
+
   Track()
       : track_id(-1),
         state(Eigen::VectorXf::Zero(8)),
@@ -69,7 +72,8 @@ struct Track {
         age(1),
         is_confirmed(false),
         is_deleted(false),
-        class_id(-1) {
+        class_id(-1),
+        confidence(0.0f) {
     bbox[0] = bbox[1] = bbox[2] = bbox[3] = 0.0f;
   }
 
@@ -82,7 +86,8 @@ struct Track {
         age(1),
         is_confirmed(false),
         is_deleted(false),
-        class_id(cls) {
+        class_id(cls),
+        confidence(0.0f) {
     bbox[0] = detection_bbox[0];
     bbox[1] = detection_bbox[1];
     bbox[2] = detection_bbox[2];

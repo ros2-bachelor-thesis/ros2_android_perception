@@ -92,6 +92,11 @@ namespace perception
      */
     bool IsReady() const;
 
+    /**
+     * Reset tracker state (clears all tracks, gallery, and ID counters)
+     */
+    void Reset();
+
   private:
     /**
      * Predict all track states (Kalman filter prediction)
@@ -172,7 +177,8 @@ namespace perception
 
     std::vector<Track> tracks_;                              ///< Active tracks
     std::map<int, std::vector<std::vector<float>>> gallery_; ///< Feature gallery per track
-    int next_id_;                                            ///< Next track ID to assign
+    int next_id_;                                            ///< Next confirmed track ID to assign
+    int next_tentative_id_;                                  ///< Next tentative track ID (negative)
 
     KalmanFilter kf_;                ///< Kalman filter instance
     std::unique_ptr<NcnnReID> reid_; ///< ReID feature extractor

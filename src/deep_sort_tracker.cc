@@ -82,7 +82,7 @@ namespace perception
 
     if (frame_count <= 10 || frame_count % 5 == 0)
     {
-      LOGI("Frame #%d: %zu matches, %d unmatched tracks, %d unmatched dets, %zu total tracks",
+      LOGD("Frame #%d: %zu matches, %d unmatched tracks, %d unmatched dets, %zu total tracks",
            frame_count, matches.size(), num_unmatched_tracks, num_unmatched_dets, tracks_.size());
     }
 
@@ -275,7 +275,7 @@ namespace perception
         gallery_[track.track_id] = std::move(gallery_[old_id]);
         gallery_.erase(old_id);
       }
-      LOGI("Track confirmed: tentative_id=%d -> confirmed_id=%d (hits=%d)",
+      LOGD("Track confirmed: tentative_id=%d -> confirmed_id=%d (hits=%d)",
            old_id, track.track_id, track.hits);
     }
   }

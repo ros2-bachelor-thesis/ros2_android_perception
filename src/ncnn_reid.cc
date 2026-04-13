@@ -123,7 +123,7 @@ std::vector<float> NcnnReID::Extract(const cv::Mat& image, const float bbox[4]) 
   extraction_count++;
 
   if (extraction_count <= 5 || extraction_count % 10 == 0) {
-    LOGI("ReID extraction #%d: bbox=[%.1f,%.1f,%.1f,%.1f], feature_norm=%.3f, first_3=[%.3f,%.3f,%.3f]",
+    LOGD("ReID extraction #%d: bbox=[%.1f,%.1f,%.1f,%.1f], feature_norm=%.3f, first_3=[%.3f,%.3f,%.3f]",
          extraction_count, bbox[0], bbox[1], bbox[2], bbox[3], norm,
          feature[0], feature[1], feature[2]);
   }

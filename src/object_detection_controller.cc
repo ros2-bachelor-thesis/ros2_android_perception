@@ -10,6 +10,24 @@
 #include "perception/visualization/annotator.h"
 #include "perception/log.h"
 
+namespace
+{
+
+  // Scale bbox from model_input space (640x352) back to original image resolution.
+  // The preprocessing chain is: resize(orig -> 640x360) then crop(y=[4,356)).
+  // Inverse: x_orig = x_model * (W/640), y_orig = (y_model + 4) * (H/360)
+  void ScaleBbox(const float src[4], float dst[4], int orig_w, int orig_h)
+  {
+    const float sx = static_cast<float>(orig_w) / 640.0f;
+    const float sy = static_cast<float>(orig_h) / 360.0f;
+    dst[0] = src[0] * sx;          // x1
+    dst[1] = (src[1] + 4.0f) * sy; // y1 (undo 4px top crop)
+    dst[2] = src[2] * sx;          // x2
+    dst[3] = (src[3] + 4.0f) * sy; // y2
+  }
+
+} // anonymous namespace
+
 namespace perception
 {
 
@@ -193,10 +211,11 @@ namespace perception
     result.tracks = all_tracks;
 
     // Step 5: Generate annotated RGB visualization
-    // Detections are in model_input_size space (640x352), so annotate on that
-    cv::Mat annotated_rgb = model_input.clone();
+    // Annotate on full-resolution image for sharp UI display.
+    // Detection coords (640x352) are scaled back to original resolution.
+    cv::Mat annotated_rgb = rgb_bgr.clone();
 
-    visualization::Annotator annotator(2); // line_width = 2 (matches Python)
+    visualization::Annotator annotator(0); // auto-scale line width based on image size
 
     // Fixed colors for each class (matches Python visualization)
     cv::Scalar colors[3] = {
@@ -217,12 +236,20 @@ namespace perception
 
         confirmed_count++;
 
-        // Label format: "cpb_beetle ID: 5"
+        char conf_buf[16];
+        snprintf(conf_buf, sizeof(conf_buf), "%.2f", track.confidence);
+        // Label format: "cpb_beetle 5: 0.82"
         std::string label = std::string(GetClassName(track.class_id)) +
-                            " ID: " + std::to_string(track.track_id);
+                            " " + std::to_string(track.track_id) +
+                            ": " + conf_buf;
+        ;
+
+        // Scale bbox from model_input space (640x352) to original resolution
+        float scaled_bbox[4];
+        ScaleBbox(track.bbox, scaled_bbox, width, height);
 
         // Use class-based color (same color for same class)
-        annotator.DrawBoundingBox(annotated_rgb, track.bbox, label,
+        annotator.DrawBoundingBox(annotated_rgb, scaled_bbox, label,
                                   colors[track.class_id]);
       }
 
@@ -238,8 +265,12 @@ namespace perception
         snprintf(conf_str, sizeof(conf_str), "%.2f", det.confidence);
         std::string label = std::string(GetClassName(det.class_id)) + " " + conf_str;
 
+        // Scale bbox from model_input space (640x352) to original resolution
+        float scaled_bbox[4];
+        ScaleBbox(det.bbox, scaled_bbox, width, height);
+
         // Use class-based color (same color for same class)
-        annotator.DrawBoundingBox(annotated_rgb, det.bbox, label,
+        annotator.DrawBoundingBox(annotated_rgb, scaled_bbox, label,
                                   colors[det.class_id]);
       }
 

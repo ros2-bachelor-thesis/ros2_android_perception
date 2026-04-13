@@ -24,8 +24,11 @@ bool NcnnDetector::LoadModel(const std::string& param_path,
                                const std::string& bin_path) {
   // Configure NCNN options for performance
   ncnn::Option opt;
-  opt.lightmode = false;      // Disable light mode for better performance (trades memory for speed)
-  opt.num_threads = 8;        // Increase from 4 to 8 for modern ARM SoCs
+  opt.lightmode = true;       // Free intermediate blobs after use (reduces memory, improves cache)
+  opt.num_threads = 4;        // 4 threads for big.LITTLE: use big+medium cores only (Pixel 7: 2x X1 + 2x A78)
+  opt.use_fp16_packed = true;
+  opt.use_fp16_storage = true;
+  opt.use_fp16_arithmetic = true;
 
   net_.opt = opt;
 
@@ -72,7 +75,7 @@ std::vector<Detection> NcnnDetector::Detect(const cv::Mat& image,
 
   // Create NCNN extractor
   ncnn::Extractor ex = net_.create_extractor();
-  ex.set_light_mode(false);  // Match net_.opt.lightmode for consistency
+  ex.set_light_mode(true);  // Match net_.opt.lightmode for consistency
   // Note: num_threads is set via net_.opt, not extractor
 
   // Input image

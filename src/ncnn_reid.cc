@@ -25,6 +25,9 @@ bool NcnnReID::LoadModel(const std::string& param_path,
   ncnn::Option opt;
   opt.lightmode = true;
   opt.num_threads = 2;  // ReID is lightweight, 2 threads sufficient
+  opt.use_fp16_packed = true;
+  opt.use_fp16_storage = true;
+  opt.use_fp16_arithmetic = true;
 
   net_.opt = opt;
 

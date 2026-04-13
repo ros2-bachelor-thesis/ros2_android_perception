@@ -137,13 +137,6 @@ namespace perception
         void Reset();
 
         /**
-         * Generate depth colormap (cv2.applyColorMap equivalent)
-         * @param depth Depth image (32FC1, meters)
-         * @return BGR8 colormap image (JET colormap)
-         */
-        static cv::Mat GenerateDepthColormap(const cv::Mat &depth);
-
-        /**
          * Get class name by ID
          * @param class_id 0=cpb_beetle, 1=cpb_larva, 2=cpb_eggs
          * @return Class name string

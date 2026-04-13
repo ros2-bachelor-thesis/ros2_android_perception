@@ -297,72 +297,7 @@ namespace perception
     result.annotated_rgb_bgr.resize(rgb_size);
     std::memcpy(result.annotated_rgb_bgr.data(), annotated_rgb.data, rgb_size);
 
-    // Step 6: Generate depth colormap visualization if depth available
-    if (!depth.empty())
-    {
-      result.has_depth_visualization = true;
-      cv::Mat annotated_depth = GenerateDepthColormap(depth);
-
-      if (enable_tracking)
-      {
-        // Draw only confirmed Deep SORT tracks on depth colormap
-        for (const auto &track : result.tracks)
-        {
-          if (!track.is_confirmed || track.time_since_update > 0)
-            continue;
-
-          // Label format: "cpb_beetle ID: 5"
-          std::string label = std::string(GetClassName(track.class_id)) +
-                              " ID: " + std::to_string(track.track_id);
-          annotator.DrawBoundingBox(annotated_depth, track.bbox, label,
-                                    colors[track.class_id]);
-        }
-      }
-      else
-      {
-        // Draw raw YOLO detections on depth colormap
-        for (const auto &det : result.detections)
-        {
-          // Label format: "cpb_beetle 0.95" (class + confidence)
-          char conf_str[16];
-          snprintf(conf_str, sizeof(conf_str), "%.2f", det.confidence);
-          std::string label = std::string(GetClassName(det.class_id)) + " " + conf_str;
-
-          annotator.DrawBoundingBox(annotated_depth, det.bbox, label,
-                                    colors[det.class_id]);
-        }
-      }
-
-      // Copy annotated depth to result (cv::Mat → std::vector)
-      result.depth_width = annotated_depth.cols;
-      result.depth_height = annotated_depth.rows;
-      size_t depth_size = result.depth_width * result.depth_height * 3;
-      result.annotated_depth_bgr.resize(depth_size);
-      std::memcpy(result.annotated_depth_bgr.data(), annotated_depth.data, depth_size);
-    }
-
     return result;
-  }
-
-  cv::Mat ObjectDetectionController::GenerateDepthColormap(const cv::Mat &depth)
-  {
-    if (depth.empty())
-    {
-      return cv::Mat();
-    }
-
-    // Python code (line 150):
-    // depth_color_map = cv2.applyColorMap(cv2.convertScaleAbs(depth, alpha=100), cv2.COLORMAP_JET)
-
-    // Convert depth (32FC1, meters) to 8-bit for colormap
-    cv::Mat depth_8u;
-    cv::convertScaleAbs(depth, depth_8u, 100.0); // alpha=100 (scale factor)
-
-    // Apply JET colormap
-    cv::Mat colormap;
-    cv::applyColorMap(depth_8u, colormap, cv::COLORMAP_JET);
-
-    return colormap;
   }
 
   const char *ObjectDetectionController::GetClassName(int class_id)

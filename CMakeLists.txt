@@ -70,7 +70,7 @@ if(NOT EXISTS "${NCNN_CHECK_FILE}")
       -DANDROID_ABI=${ANDROID_ABI}
       -DANDROID_PLATFORM=${ANDROID_PLATFORM}
       -DCMAKE_BUILD_TYPE=Release
-      -DNCNN_VULKAN=ON
+      -DNCNN_VULKAN=OFF
       -DNCNN_STRING=ON
       -DNCNN_BUILD_TOOLS=OFF
       -DNCNN_BUILD_BENCHMARK=OFF
@@ -132,7 +132,7 @@ set_target_properties(Eigen3::Eigen PROPERTIES
 set(ncnn_DIR "${NCNN_DIR}/install/lib/cmake/ncnn")
 find_package(ncnn REQUIRED)
 
-# Perception library (shared - bundles NCNN, OpenCV, glslang internally)
+# Perception library (shared - bundles NCNN, OpenCV internally)
 add_library(${PROJECT_NAME} SHARED
   src/image_preprocessor.cc
   src/ncnn_detector.cc

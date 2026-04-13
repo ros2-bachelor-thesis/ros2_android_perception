@@ -9,7 +9,7 @@ Object detection and tracking library for ROS 2 on Android using NCNN inference 
 
 - **YOLOv9 Object Detection**: 3-class detector for Colorado Potato Beetle detection (beetle, larva, eggs)
 - **Deep SORT Tracking**: Multi-object tracking with appearance-based re-identification
-- **NCNN Inference**: Optimized for ARM NEON with optional Vulkan GPU acceleration
+- **NCNN Inference**: Optimized for ARM NEON
 - **Standalone Library**: Pure C++ with no ROS dependencies - integrates via ObjectDetectionController API
 - **Android Native**: Builds as shared library, integrates via JNI with ros2_android
 
@@ -83,8 +83,7 @@ ObjectDetectionController detector(
     "models/yolov9_s_pobed.ncnn.param",
     "models/yolov9_s_pobed.ncnn.bin",
     "models/osnet_ain_x1_0.ncnn.param",
-    "models/osnet_ain_x1_0.ncnn.bin",
-    use_vulkan = false  // CPU NEON is faster on mobile
+    "models/osnet_ain_x1_0.ncnn.bin"
 );
 
 // Process frame (raw RGB buffer)
@@ -135,7 +134,7 @@ Tested on Pixel 7 (Tensor G2 SoC):
 ## Known Issues
 
 - **0 detections**: Verify models are loaded from correct path, check logcat for errors
-- **Slow inference**: Ensure Vulkan is disabled on mobile (CPU NEON is faster)
+- **Slow inference**: Check thread count and model input size
 - **Wrong coordinates**: Model expects 1280x736 simple resize, not letterbox
 
 ## License

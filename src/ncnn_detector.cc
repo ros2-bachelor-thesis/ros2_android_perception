@@ -8,10 +8,8 @@
 namespace perception {
 
 NcnnDetector::NcnnDetector(const std::string& param_path,
-                           const std::string& bin_path,
-                           bool use_vulkan)
+                           const std::string& bin_path)
     : loaded_(false),
-      use_vulkan_(use_vulkan),
       input_width_(640),
       input_height_(352),
       num_classes_(3) {
@@ -28,14 +26,6 @@ bool NcnnDetector::LoadModel(const std::string& param_path,
   ncnn::Option opt;
   opt.lightmode = false;      // Disable light mode for better performance (trades memory for speed)
   opt.num_threads = 8;        // Increase from 4 to 8 for modern ARM SoCs
-  opt.use_vulkan_compute = use_vulkan_;
-
-  // Enable FP16 arithmetic if Vulkan is available (significantly faster on mobile GPUs)
-  if (use_vulkan_) {
-    opt.use_fp16_arithmetic = true;
-    opt.use_fp16_storage = true;
-    LOGI("NCNN: Vulkan FP16 optimizations enabled");
-  }
 
   net_.opt = opt;
 

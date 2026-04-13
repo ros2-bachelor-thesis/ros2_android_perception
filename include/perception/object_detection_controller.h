@@ -47,14 +47,12 @@ namespace perception
          * @param yolo_bin Path to yolov9_s_pobed.ncnn.bin
          * @param reid_param Path to osnet_ain_x1_0.ncnn.param
          * @param reid_bin Path to osnet_ain_x1_0.ncnn.bin
-         * @param use_vulkan Use GPU acceleration (default: false, CPU NEON faster on ARM)
          */
         ObjectDetectionController(
             const std::string &yolo_param,
             const std::string &yolo_bin,
             const std::string &reid_param,
-            const std::string &reid_bin,
-            bool use_vulkan = false);
+            const std::string &reid_bin);
 
         ~ObjectDetectionController();
 

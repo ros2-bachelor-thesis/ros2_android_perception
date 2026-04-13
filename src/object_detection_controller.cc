@@ -4,8 +4,6 @@
 #include <cstring>
 #include <opencv2/opencv.hpp>
 #include <opencv2/imgproc.hpp>
-#include <ncnn/gpu.h>
-
 #include "perception/types.h"
 #include "perception/ncnn_detector.h"
 #include "perception/deep_sort_tracker.h"
@@ -15,60 +13,18 @@
 namespace perception
 {
 
-  namespace
-  {
-    /**
-     * Detect if Vulkan GPU acceleration is available
-     * @return true if Vulkan is supported, false otherwise
-     */
-    bool HasVulkanSupport()
-    {
-      ncnn::create_gpu_instance();
-      int gpu_count = ncnn::get_gpu_count();
-      ncnn::destroy_gpu_instance();
-
-      if (gpu_count > 0)
-      {
-        LOGI("Vulkan GPU detected: %d device(s) available", gpu_count);
-        return true;
-      }
-      else
-      {
-        LOGI("No Vulkan GPU detected, will use CPU");
-        return false;
-      }
-    }
-  } // anonymous namespace
-
   ObjectDetectionController::ObjectDetectionController(
       const std::string &yolo_param,
       const std::string &yolo_bin,
       const std::string &reid_param,
-      const std::string &reid_bin,
-      bool use_vulkan)
+      const std::string &reid_bin)
       : ready_(false)
   {
 
-    // Disable Vulkan for 352x640 model - non-standard dimensions cause
-    // Vulkan shader crashes (BinaryOp_vulkan SIGSEGV). CPU+NEON is sufficient.
-    bool vulkan_enabled = false;
-
-    if (use_vulkan && !vulkan_enabled)
-    {
-      LOGW("Vulkan requested but not available, falling back to CPU");
-    }
-    else if (vulkan_enabled)
-    {
-      LOGD("Vulkan GPU acceleration enabled for perception");
-    }
-    else
-    {
-      LOGD("Using CPU (NEON) for perception");
-    }
+    LOGD("Using CPU (NEON) for perception");
 
     // Load YOLOv9 detector
-    detector_ = std::make_unique<NcnnDetector>(
-        yolo_param, yolo_bin, vulkan_enabled);
+    detector_ = std::make_unique<NcnnDetector>(yolo_param, yolo_bin);
 
     if (!detector_->IsLoaded())
     {

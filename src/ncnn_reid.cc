@@ -21,11 +21,10 @@ NcnnReID::~NcnnReID() {
 bool NcnnReID::LoadModel(const std::string& param_path,
                           const std::string& bin_path) {
 
-  // Configure NCNN options (no Vulkan - small model, CPU sufficient)
+  // Configure NCNN options
   ncnn::Option opt;
   opt.lightmode = true;
   opt.num_threads = 2;  // ReID is lightweight, 2 threads sufficient
-  opt.use_vulkan_compute = false;
 
   net_.opt = opt;
 

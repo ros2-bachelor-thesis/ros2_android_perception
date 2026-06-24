@@ -13,10 +13,11 @@ namespace perception
 
   DeepSortTracker::DeepSortTracker(const std::string &reid_param,
                                    const std::string &reid_bin,
-                                   const DeepSortConfig &config)
+                                   const DeepSortConfig &config,
+                                   bool use_vulkan)
       : next_id_{1, 1, 1}, next_tentative_id_(1), config_(config)
   {
-    reid_ = std::make_unique<NcnnReID>(reid_param, reid_bin);
+    reid_ = std::make_unique<NcnnReID>(reid_param, reid_bin, use_vulkan);
   }
 
   DeepSortTracker::~DeepSortTracker() = default;

@@ -6,8 +6,10 @@
 
 namespace perception {
 
-NcnnReID::NcnnReID(const std::string& param_path, const std::string& bin_path)
+NcnnReID::NcnnReID(const std::string& param_path, const std::string& bin_path,
+                   bool use_vulkan)
     : loaded_(false),
+      use_vulkan_(use_vulkan),
       input_width_(128),
       input_height_(256),
       feature_dim_(512) {
@@ -25,9 +27,12 @@ bool NcnnReID::LoadModel(const std::string& param_path,
   ncnn::Option opt;
   opt.lightmode = true;
   opt.num_threads = 2;  // ReID is lightweight, 2 threads sufficient
-  opt.use_fp16_packed = true;
-  opt.use_fp16_storage = true;
-  opt.use_fp16_arithmetic = true;
+  opt.use_vulkan_compute = use_vulkan_;
+  // FP16 disabled to match detector path: device lacks ARMv8.2 asimdhp,
+  // enabling FP16 SIGSEGVs in load_model on the CPU path.
+  opt.use_fp16_packed = false;
+  opt.use_fp16_storage = false;
+  opt.use_fp16_arithmetic = false;
 
   net_.opt = opt;
 

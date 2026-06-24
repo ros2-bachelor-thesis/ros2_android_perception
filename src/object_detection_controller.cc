@@ -4,6 +4,7 @@
 #include <cstring>
 #include <opencv2/opencv.hpp>
 #include <opencv2/imgproc.hpp>
+#include <ncnn/gpu.h>
 #include "perception/types.h"
 #include "perception/ncnn_detector.h"
 #include "perception/deep_sort_tracker.h"
@@ -36,13 +37,54 @@ namespace perception
       const std::string &yolo_bin,
       const std::string &reid_param,
       const std::string &reid_bin)
-      : ready_(false)
+      : ready_(false),
+        use_vulkan_(false),
+        gpu_instance_owned_(false)
   {
+    // Runtime Vulkan probe. NCNN's GPU API is compiled in when the library
+    // is built with NCNN_VULKAN=ON. create_gpu_instance loads the Vulkan
+    // driver and enumerates devices; get_gpu_count returns 0 when none are
+    // usable (driver missing, headless emulator, denied by SELinux, ...).
+    int gpu_init = ncnn::create_gpu_instance();
+    if (gpu_init == 0)
+    {
+      gpu_instance_owned_ = true;
+      int gpu_count = ncnn::get_gpu_count();
+      if (gpu_count > 0)
+      {
+        const ncnn::GpuInfo &info = ncnn::get_gpu_info(0);
+        const uint32_t api = info.api_version();
+        const uint32_t drv = info.driver_version();
+        LOGI("GPU detected: %s (Vulkan API %u.%u.%u, driver 0x%08x, type=%d)",
+             info.device_name(),
+             (api >> 22) & 0x3ff,
+             (api >> 12) & 0x3ff,
+             api & 0xfff,
+             drv,
+             info.type());
+        use_vulkan_ = true;
+      }
+      else
+      {
+        LOGI("Vulkan instance created but no GPU devices reported; using CPU NEON");
+      }
+    }
+    else
+    {
+      LOGI("ncnn::create_gpu_instance() returned %d; using CPU NEON", gpu_init);
+    }
 
-    LOGD("Using CPU (NEON) for perception");
+    if (use_vulkan_)
+    {
+      LOGD("Using Vulkan GPU for perception");
+    }
+    else
+    {
+      LOGD("Using CPU (NEON) for perception");
+    }
 
     // Load YOLOv9 detector
-    detector_ = std::make_unique<NcnnDetector>(yolo_param, yolo_bin);
+    detector_ = std::make_unique<NcnnDetector>(yolo_param, yolo_bin, use_vulkan_);
 
     if (!detector_->IsLoaded())
     {
@@ -60,7 +102,7 @@ namespace perception
     config.max_iou_distance = 0.7f;    // Python: max_iou_distance=0.7
 
     tracker_ = std::make_unique<DeepSortTracker>(
-        reid_param, reid_bin, config);
+        reid_param, reid_bin, config, use_vulkan_);
 
     if (!tracker_->IsReady())
     {
@@ -73,7 +115,15 @@ namespace perception
 
   ObjectDetectionController::~ObjectDetectionController()
   {
-    // Unique_ptr handles cleanup
+    // Net destructors must run before destroy_gpu_instance so any Vulkan
+    // resources the nets hold are released first.
+    tracker_.reset();
+    detector_.reset();
+    if (gpu_instance_owned_)
+    {
+      ncnn::destroy_gpu_instance();
+      gpu_instance_owned_ = false;
+    }
   }
 
   std::vector<Track> ObjectDetectionController::ProcessFrame(

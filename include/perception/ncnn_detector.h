@@ -26,9 +26,13 @@ class NcnnDetector {
    *
    * @param param_path Path to .ncnn.param file
    * @param bin_path Path to .ncnn.bin file
+   * @param use_vulkan If true, enable Vulkan GPU compute path. Caller is
+   *                   responsible for having called ncnn::create_gpu_instance()
+   *                   first and verifying ncnn::get_gpu_count() > 0.
    */
   NcnnDetector(const std::string& param_path,
-               const std::string& bin_path);
+               const std::string& bin_path,
+               bool use_vulkan = false);
 
   ~NcnnDetector();
 
@@ -99,6 +103,7 @@ class NcnnDetector {
 
   ncnn::Net net_;           ///< NCNN inference network
   bool loaded_;             ///< Model load status
+  bool use_vulkan_;         ///< Vulkan GPU compute path enabled
   int input_width_;         ///< Model input width (1280 for YOLOv9-s)
   int input_height_;        ///< Model input height (736 for YOLOv9-s)
   int num_classes_;         ///< Number of classes (3: beetle, larva, eggs)

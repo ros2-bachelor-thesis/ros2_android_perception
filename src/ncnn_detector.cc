@@ -8,8 +8,10 @@
 namespace perception {
 
 NcnnDetector::NcnnDetector(const std::string& param_path,
-                           const std::string& bin_path)
+                           const std::string& bin_path,
+                           bool use_vulkan)
     : loaded_(false),
+      use_vulkan_(use_vulkan),
       input_width_(640),
       input_height_(352),
       num_classes_(3) {
@@ -26,9 +28,15 @@ bool NcnnDetector::LoadModel(const std::string& param_path,
   ncnn::Option opt;
   opt.lightmode = true;       // Free intermediate blobs after use (reduces memory, improves cache)
   opt.num_threads = 4;        // 4 threads for big.LITTLE: use big+medium cores only (Pixel 7: 2x X1 + 2x A78)
-  opt.use_fp16_packed = true;
-  opt.use_fp16_storage = true;
-  opt.use_fp16_arithmetic = true;
+  opt.use_vulkan_compute = use_vulkan_;
+  // FP16 disabled: enabling use_fp16_arithmetic requires ARMv8.2 FP16 NEON
+  // (asimdhp) on CPU. On devices without it NCNN SIGSEGVs during load_model
+  // while parsing FP16 packed weights. Re-enable only after probing
+  // cpu_support_arm_asimdhp() (CPU path) or gpu_info.support_fp16_*() (Vulkan).
+  opt.use_fp16_packed = false;
+  opt.use_fp16_storage = false;
+  opt.use_fp16_arithmetic = false;
+  LOGD("NCNN detector: num_threads=%d vulkan=%d", opt.num_threads, int(use_vulkan_));
 
   net_.opt = opt;
 

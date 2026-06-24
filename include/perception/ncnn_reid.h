@@ -26,8 +26,11 @@ namespace perception
      *
      * @param param_path Path to osnet_ain_x1_0.ncnn.param file
      * @param bin_path Path to osnet_ain_x1_0.ncnn.bin file
+     * @param use_vulkan If true, enable Vulkan GPU compute path. Owning code
+     *                   must have called ncnn::create_gpu_instance() first.
      */
-    NcnnReID(const std::string &param_path, const std::string &bin_path);
+    NcnnReID(const std::string &param_path, const std::string &bin_path,
+             bool use_vulkan = false);
 
     ~NcnnReID();
 
@@ -79,6 +82,7 @@ namespace perception
 
     ncnn::Net net_;    ///< NCNN inference network
     bool loaded_;      ///< Model load status
+    bool use_vulkan_;  ///< Vulkan GPU compute path enabled
     int input_width_;  ///< ReID input width (128 for OSNet)
     int input_height_; ///< ReID input height (256 for OSNet)
     int feature_dim_;  ///< Output feature dimension (512 for OSNet)

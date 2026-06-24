@@ -145,6 +145,8 @@ namespace perception
         std::unique_ptr<NcnnDetector> detector_;
         std::unique_ptr<DeepSortTracker> tracker_;
         bool ready_;
+        bool use_vulkan_;           ///< Resolved at construction via runtime GPU probe
+        bool gpu_instance_owned_;   ///< True if this instance called ncnn::create_gpu_instance()
 
         // Cache last results
         std::vector<Track> last_confirmed_tracks_;

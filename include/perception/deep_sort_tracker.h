@@ -56,10 +56,12 @@ namespace perception
      * @param reid_param Path to osnet_ain_x1_0.ncnn.param
      * @param reid_bin Path to osnet_ain_x1_0.ncnn.bin
      * @param config Tracker configuration parameters
+     * @param use_vulkan Forwarded to the internal NcnnReID model
      */
     DeepSortTracker(const std::string &reid_param,
                     const std::string &reid_bin,
-                    const DeepSortConfig &config = DeepSortConfig());
+                    const DeepSortConfig &config = DeepSortConfig(),
+                    bool use_vulkan = false);
 
     ~DeepSortTracker();
 

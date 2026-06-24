@@ -37,10 +37,29 @@ namespace perception
       return tracks_;
     }
 
+    // Compute dt in 30 FPS frame equivalents from wall clock. At the first
+    // call, fall back to dt=1 (Python parity). Clamp to [0.5, 30] so a long
+    // pause (UI off, model load) doesn't blow up the Kalman covariance.
+    float dt_frames = 1.0f;
+    auto now = std::chrono::steady_clock::now();
+    if (has_last_update_time_)
+    {
+      std::chrono::duration<float> elapsed = now - last_update_time_;
+      dt_frames = elapsed.count() * 30.0f;
+      if (dt_frames < 0.5f) dt_frames = 0.5f;
+      if (dt_frames > 30.0f) dt_frames = 30.0f;
+    }
+    last_update_time_ = now;
+    has_last_update_time_ = true;
+
+    // Reset per-frame diagnostic counters.
+    diag_mahal_rejected_ = 0;
+    diag_cosine_rejected_ = 0;
+
     // Python behavior: If no detections, run predict-only cycle
     if (detections.empty())
     {
-      Predict();
+      Predict(dt_frames);
       for (size_t i = 0; i < tracks_.size(); i++)
       {
         MarkMissed(i);
@@ -50,7 +69,7 @@ namespace perception
     }
 
     // Step 1: Predict all track states
-    Predict();
+    Predict(dt_frames);
 
     // Step 2: Extract ReID features from detections
     std::vector<Detection> detections_with_features = detections;
@@ -83,8 +102,9 @@ namespace perception
 
     if (frame_count <= 10 || frame_count % 5 == 0)
     {
-      LOGD("Frame #%d: %zu matches, %d unmatched tracks, %d unmatched dets, %zu total tracks",
-           frame_count, matches.size(), num_unmatched_tracks, num_unmatched_dets, tracks_.size());
+      LOGD("Frame #%d: %zu matches, %d unmatched tracks, %d unmatched dets, %zu total tracks, dt=%.2f, cos_rej=%d",
+           frame_count, matches.size(), num_unmatched_tracks, num_unmatched_dets,
+           tracks_.size(), dt_frames, diag_cosine_rejected_);
     }
 
     // Step 5: Mark unmatched tracks as missed
@@ -122,11 +142,11 @@ namespace perception
     return tracks_;
   }
 
-  void DeepSortTracker::Predict()
+  void DeepSortTracker::Predict(float dt)
   {
     for (auto &track : tracks_)
     {
-      kf_.Predict(track.state, track.covariance);
+      kf_.Predict(track.state, track.covariance, dt);
       track.UpdateBboxFromState();
       track.age += 1;              // Python parity - track.py line 123
       track.time_since_update += 1; // Python parity - track.py line 124
@@ -284,12 +304,17 @@ namespace perception
   void DeepSortTracker::MarkMissed(int track_idx)
   {
     Track &track = tracks_[track_idx];
-    // Python parity (track.py:147-153): predict() already incremented TSU,
-    // mark_missed() only sets state to Deleted
+    // Departs from Python Deep SORT, which deletes tentative tracks on the
+    // first miss. At low FPS (e.g. 2-3 Hz) the n_init=3 confirmation window
+    // is impossible to reach if one Mahalanobis-gated miss kills the track,
+    // so we allow a tentative track to survive up to n_init misses before
+    // being deleted. Confirmed tracks still respect max_age unchanged.
     if (!track.is_confirmed)
     {
-      // Tentative tracks deleted immediately on first miss
-      track.is_deleted = true;
+      if (track.time_since_update > config_.n_init)
+      {
+        track.is_deleted = true;
+      }
     }
     else if (track.time_since_update > config_.max_age)
     {
@@ -331,6 +356,9 @@ namespace perception
     gallery_.clear();
     next_id_[0] = next_id_[1] = next_id_[2] = 1;
     next_tentative_id_ = 1;
+    has_last_update_time_ = false;
+    diag_mahal_rejected_ = 0;
+    diag_cosine_rejected_ = 0;
   }
 
   void DeepSortTracker::DeleteOldTracks()
@@ -375,9 +403,22 @@ namespace perception
           continue;
         }
 
+        // Class-aware gate: forbid matching detections of class A to tracks
+        // of class B. With 3 visually-distinct classes (beetle / larva / eggs)
+        // a low cosine distance across classes is almost always a false match.
+        if (track.class_id != det.class_id)
+        {
+          cost_matrix(i, j) = 1e5f;
+          continue;
+        }
+
         // Compute minimum cosine distance to gallery
         float min_dist = MinCosineDistanceToGallery(det.feature, track.track_id);
         cost_matrix(i, j) = min_dist;
+        if (min_dist > config_.max_cosine_distance)
+        {
+          diag_cosine_rejected_++;
+        }
       }
     }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <opencv2/opencv.hpp>
+#include <chrono>
 #include <map>
 #include <memory>
 #include <string>
@@ -102,8 +103,10 @@ namespace perception
   private:
     /**
      * Predict all track states (Kalman filter prediction)
+     *
+     * @param dt Time step in 30 FPS frame equivalents (1.0 = 30 FPS baseline).
      */
-    void Predict();
+    void Predict(float dt = 1.0f);
 
     /**
      * Match detections to tracks using cascade + IoU strategy
@@ -185,6 +188,14 @@ namespace perception
     KalmanFilter kf_;                ///< Kalman filter instance
     std::unique_ptr<NcnnReID> reid_; ///< ReID feature extractor
     DeepSortConfig config_;          ///< Configuration parameters
+
+    /// Last Update() wall-clock time, used to scale Kalman dt for low-FPS pipelines.
+    std::chrono::steady_clock::time_point last_update_time_;
+    bool has_last_update_time_ = false;
+
+    /// Diagnostic counters (reset every frame): rejections from the two cost gates.
+    int diag_mahal_rejected_ = 0;
+    int diag_cosine_rejected_ = 0;
   };
 
 } // namespace perception

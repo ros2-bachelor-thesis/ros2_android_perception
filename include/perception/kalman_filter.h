@@ -42,13 +42,17 @@ class KalmanFilter {
    * Predict next state distribution (Kalman prediction step)
    *
    * Propagates state forward in time using constant velocity model:
-   *   x_pred = F * x
-   *   P_pred = F * P * F' + Q
+   *   x_pred = F(dt) * x
+   *   P_pred = F(dt) * P * F(dt)' + Q(dt)
    *
    * @param mean 8D mean vector (modified in-place)
    * @param covariance 8x8 covariance matrix (modified in-place)
+   * @param dt Time step in "30 FPS frame equivalents". 1.0 = the original
+   *           tuning. At lower frame rates the caller should pass the actual
+   *           elapsed seconds times 30 to widen the chi-square gate.
    */
-  void Predict(Eigen::VectorXf& mean, Eigen::MatrixXf& covariance);
+  void Predict(Eigen::VectorXf& mean, Eigen::MatrixXf& covariance,
+               float dt = 1.0f);
 
   /**
    * Update state with measurement (Kalman correction step)

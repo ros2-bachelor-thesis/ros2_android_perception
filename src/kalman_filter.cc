@@ -52,11 +52,22 @@ void KalmanFilter::Initiate(const float measurement[4],
 }
 
 void KalmanFilter::Predict(Eigen::VectorXf& mean,
-                            Eigen::MatrixXf& covariance) {
-  // Predict state: x = F * x
-  mean = motion_mat_ * mean;
+                            Eigen::MatrixXf& covariance,
+                            float dt) {
+  // Build a per-call motion matrix F(dt) so that position propagates by dt
+  // velocity units. motion_mat_ stays at dt=1 for callers that take the
+  // default. At low FPS dt > 1 widens the chi-square gate via the F * P * F'
+  // term, letting Mahalanobis-gated assignment recover from large innovations.
+  Eigen::MatrixXf F = motion_mat_;
+  for (int i = 0; i < 4; i++) {
+    F(i, i + 4) = dt;
+  }
 
-  // Process noise covariance Q (uncertainty grows with prediction)
+  // Predict state: x = F * x
+  mean = F * mean;
+
+  // Process noise covariance Q (uncertainty grows with prediction). Scale by
+  // dt so that one large step has roughly the same growth as dt small steps.
   std::vector<float> std_pos(4);
   std_pos[0] = std_weight_position_ * mean(3);  // std_x
   std_pos[1] = std_weight_position_ * mean(3);  // std_y
@@ -71,12 +82,12 @@ void KalmanFilter::Predict(Eigen::VectorXf& mean,
 
   Eigen::MatrixXf motion_cov = Eigen::MatrixXf::Zero(8, 8);
   for (int i = 0; i < 4; i++) {
-    motion_cov(i, i) = std_pos[i] * std_pos[i];
-    motion_cov(i + 4, i + 4) = std_vel[i] * std_vel[i];
+    motion_cov(i, i) = std_pos[i] * std_pos[i] * dt;
+    motion_cov(i + 4, i + 4) = std_vel[i] * std_vel[i] * dt;
   }
 
   // Predict covariance: P = F * P * F' + Q
-  covariance = motion_mat_ * covariance * motion_mat_.transpose() + motion_cov;
+  covariance = F * covariance * F.transpose() + motion_cov;
 }
 
 void KalmanFilter::Project(const Eigen::VectorXf& mean,

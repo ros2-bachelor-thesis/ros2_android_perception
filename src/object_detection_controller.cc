@@ -94,12 +94,14 @@ namespace perception
 
     // Load Deep SORT tracker (includes ReID model)
     DeepSortConfig config;
-    // Match Python reference exactly (object_detection.py + tracker.py defaults)
-    config.max_cosine_distance = 0.4f; // Python: max_cosine_distance=0.4
+    // Low-FPS tuned (~2-3 FPS on this Vulkan pipeline). Python reference uses
+    // 0.4 / 0.7 but those are calibrated for 30 FPS where motion blur and
+    // appearance drift between frames is small.
+    config.max_cosine_distance = 0.5f; // was 0.4 (Python)
     config.nn_budget = 100;            // Cap gallery size for Android memory + O(100) search bound
     config.max_age = 30;               // Python: max_age=30
     config.n_init = 3;                 // Python: n_init=3
-    config.max_iou_distance = 0.7f;    // Python: max_iou_distance=0.7
+    config.max_iou_distance = 0.9f;    // was 0.7 (Python); fallback for large displacement
 
     tracker_ = std::make_unique<DeepSortTracker>(
         reid_param, reid_bin, config, use_vulkan_);

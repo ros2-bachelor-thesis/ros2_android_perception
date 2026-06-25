@@ -495,8 +495,11 @@ namespace perception
     std::vector<Track> confirmed;
     for (const auto &track : tracks_)
     {
-      // Python: Only return confirmed tracks updated within last frame
-      if (track.is_confirmed && track.time_since_update <= 1)
+      // Return confirmed tracks missed for at most 3 frames (~1s at 2.7 FPS).
+      // Python uses <=1 (30 FPS, so ~33ms gap). At 2.7 FPS one missed YOLO
+      // detection = ~370ms gap; <=3 prevents blinking during brief occlusions
+      // while still pruning truly lost tracks.
+      if (track.is_confirmed && track.time_since_update <= 3)
       {
         confirmed.push_back(track);
       }

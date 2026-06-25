@@ -97,11 +97,11 @@ namespace perception
     // Low-FPS tuned (~2-3 FPS on this Vulkan pipeline). Python reference uses
     // 0.4 / 0.7 but those are calibrated for 30 FPS where motion blur and
     // appearance drift between frames is small.
-    config.max_cosine_distance = 0.5f; // was 0.4 (Python)
-    config.nn_budget = 100;            // Cap gallery size for Android memory + O(100) search bound
-    config.max_age = 30;               // Python: max_age=30
-    config.n_init = 3;                 // Python: n_init=3
-    config.max_iou_distance = 0.9f;    // was 0.7 (Python); fallback for large displacement
+    config.max_cosine_distance = 0.55f; // was 0.4 (Python); 0.55 tolerates low-FPS appearance drift
+    config.nn_budget = 100;             // Cap gallery size for Android memory + O(100) search bound
+    config.max_age = 30;                // Python: max_age=30 (~11s at 2.7 FPS)
+    config.n_init = 1;                  // was 3 (Python); at 2.7 FPS n_init=3 delays confirmation ~1s
+    config.max_iou_distance = 0.9f;     // was 0.7 (Python); fallback for large displacement
 
     tracker_ = std::make_unique<DeepSortTracker>(
         reid_param, reid_bin, config, use_vulkan_);

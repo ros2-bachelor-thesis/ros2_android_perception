@@ -11,23 +11,6 @@
 #include "perception/visualization/annotator.h"
 #include "perception/log.h"
 
-namespace
-{
-
-  // Scale bbox from model_input space (640x352) back to original image resolution.
-  // The preprocessing chain is: resize(orig -> 640x360) then crop(y=[4,356)).
-  // Inverse: x_orig = x_model * (W/640), y_orig = (y_model + 4) * (H/360)
-  void ScaleBbox(const float src[4], float dst[4], int orig_w, int orig_h)
-  {
-    const float sx = static_cast<float>(orig_w) / 640.0f;
-    const float sy = static_cast<float>(orig_h) / 360.0f;
-    dst[0] = src[0] * sx;          // x1
-    dst[1] = (src[1] + 4.0f) * sy; // y1 (undo 4px top crop)
-    dst[2] = src[2] * sx;          // x2
-    dst[3] = (src[3] + 4.0f) * sy; // y2
-  }
-
-} // anonymous namespace
 
 namespace perception
 {
@@ -145,7 +128,7 @@ namespace perception
     cv::Mat bgr_image(height, width, CV_8UC3, const_cast<uint8_t *>(rgb_data));
 
     // Step 1: Run YOLOv9 detector
-    // - Preprocesses image (simple resize to 1280x736, normalize)
+    // - Resizes image to 640x640 internally, normalizes
     // - NCNN inference
     // - Decodes output (bbox, confidence, class)
     // - Applies NMS
@@ -210,18 +193,15 @@ namespace perception
       return result;
     }
 
+    auto t_frame_start = std::chrono::high_resolution_clock::now();
+
     // Wrap raw BGR buffer in cv::Mat (zero-copy, internal use only)
     cv::Mat rgb_bgr(height, width, CV_8UC3, const_cast<uint8_t *>(bgr_data));
 
-    // Match Python preprocessing (object_detection.py yolov9 branch lines 224-226):
-    //   img = cv2.resize(self.rgb_image, (640, 360))  # color_depth_size
-    //   img = img[4:-4,:]                              # crop to 640x352
-    //   im0 = img.copy()                               # detection space = 640x352
-    // NCNN model expects 1280x736, so we pass the 640x352 image and NCNN
-    // resizes internally. Detections are then scaled back to 640x352 (im0 space).
-    cv::Mat resized;
-    cv::resize(rgb_bgr, resized, cv::Size(640, 360));
-    cv::Mat model_input = resized(cv::Rect(0, 4, 640, 352)).clone();
+    // Pass original image directly. NcnnDetector resizes to 640x640 internally
+    // via from_pixels_resize and applies letterbox gain/pad math so returned
+    // bbox coordinates are in original-image space.
+    cv::Mat& model_input = rgb_bgr;
 
     // Wrap depth buffer in cv::Mat if provided (zero-copy, internal use only)
     cv::Mat depth;
@@ -232,8 +212,7 @@ namespace perception
     }
 
     // Step 1: Run YOLOv9 detector
-    // NCNN internally resizes 640x352 -> 1280x736, then scale_boxes maps
-    // detections back to model_input size (640x352) via gain/pad math.
+    // NCNN resizes original image -> 640x640, returns bboxes in original-image space.
     auto detect_start = std::chrono::high_resolution_clock::now();
     auto all_detections = detector_->Detect(model_input, conf_threshold, iou_threshold);
     auto detect_end = std::chrono::high_resolution_clock::now();
@@ -263,8 +242,7 @@ namespace perception
     result.tracks = all_tracks;
 
     // Step 5: Generate annotated RGB visualization
-    // Annotate on full-resolution image for sharp UI display.
-    // Detection coords (640x352) are scaled back to original resolution.
+    // Bboxes are already in original-resolution space; draw directly.
     cv::Mat annotated_rgb = rgb_bgr.clone();
 
     visualization::Annotator annotator(0); // auto-scale line width based on image size
@@ -296,12 +274,7 @@ namespace perception
                             ": " + conf_buf;
         ;
 
-        // Scale bbox from model_input space (640x352) to original resolution
-        float scaled_bbox[4];
-        ScaleBbox(track.bbox, scaled_bbox, width, height);
-
-        // Use class-based color (same color for same class)
-        annotator.DrawBoundingBox(annotated_rgb, scaled_bbox, label,
+        annotator.DrawBoundingBox(annotated_rgb, track.bbox, label,
                                   colors[track.class_id]);
       }
 
@@ -312,17 +285,10 @@ namespace perception
       // Draw raw YOLO detections (no track IDs)
       for (const auto &det : result.detections)
       {
-        // Label format: "cpb_beetle 0.95" (class + confidence)
         char conf_str[16];
         snprintf(conf_str, sizeof(conf_str), "%.2f", det.confidence);
         std::string label = std::string(GetClassName(det.class_id)) + " " + conf_str;
-
-        // Scale bbox from model_input space (640x352) to original resolution
-        float scaled_bbox[4];
-        ScaleBbox(det.bbox, scaled_bbox, width, height);
-
-        // Use class-based color (same color for same class)
-        annotator.DrawBoundingBox(annotated_rgb, scaled_bbox, label,
+        annotator.DrawBoundingBox(annotated_rgb, det.bbox, label,
                                   colors[det.class_id]);
       }
 
@@ -330,11 +296,18 @@ namespace perception
     }
 
     // Copy annotated RGB to result (cv::Mat → std::vector)
+    auto t_annot_start = std::chrono::high_resolution_clock::now();
     result.rgb_width = annotated_rgb.cols;
     result.rgb_height = annotated_rgb.rows;
     size_t rgb_size = result.rgb_width * result.rgb_height * 3;
     result.annotated_rgb_bgr.resize(rgb_size);
     std::memcpy(result.annotated_rgb_bgr.data(), annotated_rgb.data, rgb_size);
+    auto t_frame_end = std::chrono::high_resolution_clock::now();
+
+    const double ms_frame_total = std::chrono::duration<double, std::milli>(t_frame_end - t_frame_start).count();
+    const double ms_annot = std::chrono::duration<double, std::milli>(t_frame_end - t_annot_start).count();
+    LOGD("=== ProcessFrame total: %.1f ms  (annotation+memcpy=%.2f ms) ===",
+         ms_frame_total, ms_annot);
 
     return result;
   }

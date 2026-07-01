@@ -1,6 +1,7 @@
 #include "perception/ncnn_reid.h"
 #include "perception/image_preprocessor.h"
 #include "perception/log.h"
+#include <chrono>
 #include <cmath>
 #include <ncnn/net.h>
 
@@ -60,38 +61,35 @@ std::vector<float> NcnnReID::Extract(const cv::Mat& image, const float bbox[4]) 
   int x2 = static_cast<int>(std::min(static_cast<float>(image.cols - 1), bbox[2]));
   int y2 = static_cast<int>(std::min(static_cast<float>(image.rows - 1), bbox[3]));
 
-  // Check for valid bbox
   if (x2 <= x1 || y2 <= y1) {
     return feature;
   }
 
-  // Crop bbox region
+  // Step 1: crop + resize
+  auto t0 = std::chrono::high_resolution_clock::now();
   cv::Rect roi(x1, y1, x2 - x1, y2 - y1);
   cv::Mat cropped = image(roi).clone();
-
-  // Resize to ReID input size (128x256 for OSNet)
   cv::Mat resized;
   cv::resize(cropped, resized, cv::Size(input_width_, input_height_));
-
-  // Convert BGR to RGB (OSNet expects RGB)
   cv::Mat rgb;
   cv::cvtColor(resized, rgb, cv::COLOR_BGR2RGB);
+  auto t1 = std::chrono::high_resolution_clock::now();
 
+  // Step 2: pack pixels into ncnn::Mat
   // IMPORTANT: OSNet expects uint8 [0-255], NOT normalized [0-1]
-  // Create NCNN Mat from pixel data
   ncnn::Mat input = ncnn::Mat::from_pixels(
       rgb.data, ncnn::Mat::PIXEL_RGB, input_width_, input_height_);
+  auto t2 = std::chrono::high_resolution_clock::now();
+  LOGD("[ncnn] ReID from_pixels: %.2f ms", std::chrono::duration<double, std::milli>(t2 - t1).count());
 
-  // Create NCNN extractor
+  // Step 3: forward pass
   ncnn::Extractor ex = net_.create_extractor();
   ex.set_light_mode(true);
-
-  // Input image
   ex.input(input_layer_, input);
-
-  // Run inference
   ncnn::Mat output;
   int ret = ex.extract(output_layer_, output);
+  auto t3 = std::chrono::high_resolution_clock::now();
+  LOGD("[ncnn] ReID ex.extract: %.2f ms", std::chrono::duration<double, std::milli>(t3 - t2).count());
 
   if (ret != 0) {
     LOGE("ReID inference failed: ex.extract returned %d", ret);
@@ -106,32 +104,20 @@ std::vector<float> NcnnReID::Extract(const cv::Mat& image, const float bbox[4]) 
     return feature;
   }
 
-  // Copy output to vector
   feature.resize(feature_dim_);
   const float* output_data = output;
   for (int i = 0; i < feature_dim_; i++) {
     feature[i] = output_data[i];
   }
 
-  // L2-normalize feature
+  // Step 4: L2-normalize
   L2Normalize(feature);
+  auto t4 = std::chrono::high_resolution_clock::now();
 
-  // Compute L2 norm to verify normalization
-  float norm = 0.0f;
-  for (float val : feature) {
-    norm += val * val;
-  }
-  norm = std::sqrt(norm);
-
-  // Log extraction with feature statistics
   static int extraction_count = 0;
   extraction_count++;
-
-  if (extraction_count <= 5 || extraction_count % 10 == 0) {
-    LOGD("ReID extraction #%d: bbox=[%.1f,%.1f,%.1f,%.1f], feature_norm=%.3f, first_3=[%.3f,%.3f,%.3f]",
-         extraction_count, bbox[0], bbox[1], bbox[2], bbox[3], norm,
-         feature[0], feature[1], feature[2]);
-  }
+  LOGD("[ncnn] ReID #%d total: %.2f ms", extraction_count,
+       std::chrono::duration<double, std::milli>(t4 - t0).count());
 
   return feature;
 }

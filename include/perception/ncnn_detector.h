@@ -15,8 +15,8 @@ namespace perception {
  * Performs inference on NCNN-converted YOLOv9 model for 3-class
  * Colorado Potato Beetle detection (beetle, larva, eggs).
  *
- * Model input: 1280x736 RGB (normalized to [0,1])
- * Model output: [1, num_anchors, 5+num_classes] tensor
+ * Model input: 640x352 RGB (stretch-resized + 4px crop, normalized to [0,1])
+ * Model output: [num_anchors, 4+num_classes] tensor
  * Post-processing: Confidence filtering + class-aware NMS
  */
 class NcnnDetector {
@@ -40,10 +40,9 @@ class NcnnDetector {
    * Detect objects in image
    *
    * Pipeline:
-   * 1. Preprocess: simple resize to 1280x736, normalize to [0,1]
-   * 2. NCNN inference: YOLOv9 dual-head forward pass (out0 + out1)
-   * 3. Concatenate: merge both detection heads
-   * 4. Decode output: parse bounding boxes + class scores (no objectness)
+   * 1. Preprocess: resize to 640x360, crop 4px top+bottom → 640x352, normalize to [0,1]
+   * 2. NCNN inference: YOLOv9 forward pass (out0 only - out1 absent in exported model)
+   * 3. Decode output: parse bounding boxes + class scores (no objectness)
    * 5. Filter: confidence threshold
    * 6. NMS: class-aware non-maximum suppression
    *
@@ -62,7 +61,7 @@ class NcnnDetector {
   bool IsLoaded() const { return loaded_; }
 
   /**
-   * Get model input dimensions (1280x736 for yolov9_s_pobed)
+   * Get model input dimensions (640x352 for yolov9_s_pobed)
    */
   int GetInputWidth() const { return input_width_; }
   int GetInputHeight() const { return input_height_; }
@@ -104,8 +103,8 @@ class NcnnDetector {
   ncnn::Net net_;           ///< NCNN inference network
   bool loaded_;             ///< Model load status
   bool use_vulkan_;         ///< Vulkan GPU compute path enabled
-  int input_width_;         ///< Model input width (1280 for YOLOv9-s)
-  int input_height_;        ///< Model input height (736 for YOLOv9-s)
+  int input_width_;         ///< Model input width (640 for yolov9_s_pobed)
+  int input_height_;        ///< Model input height (352 for yolov9_s_pobed)
   int num_classes_;         ///< Number of classes (3: beetle, larva, eggs)
 
   // Layer names (may need adjustment based on actual .param file)

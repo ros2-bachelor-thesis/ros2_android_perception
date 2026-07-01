@@ -68,18 +68,24 @@ namespace perception
       return tracks_;
     }
 
-    // Step 1: Predict all track states
+    // Step 1: Predict all track states (Kalman predict, cheap)
+    auto t_predict_start = std::chrono::high_resolution_clock::now();
     Predict(dt_frames);
+    auto t_predict_end = std::chrono::high_resolution_clock::now();
 
-    // Step 2: Extract ReID features from detections
+    // Step 2: Extract ReID features — one inference per detection, dominant cost
+    auto t_reid_start = std::chrono::high_resolution_clock::now();
     std::vector<Detection> detections_with_features = detections;
     for (auto &det : detections_with_features)
     {
       det.feature = reid_->Extract(image, det.bbox);
     }
+    auto t_reid_end = std::chrono::high_resolution_clock::now();
 
-    // Step 3: Match detections to tracks
+    // Step 3: Cascade + IoU matching
+    auto t_match_start = std::chrono::high_resolution_clock::now();
     auto matches = MatchDetections(image, detections_with_features);
+    auto t_match_end = std::chrono::high_resolution_clock::now();
 
     // Track which tracks and detections are matched
     std::set<int> matched_tracks;
@@ -96,16 +102,8 @@ namespace perception
       matched_detections.insert(det_idx);
     }
 
-    // Log matching statistics
     int num_unmatched_tracks = tracks_.size() - matched_tracks.size();
     int num_unmatched_dets = detections_with_features.size() - matched_detections.size();
-
-    if (frame_count <= 10 || frame_count % 5 == 0)
-    {
-      LOGD("Frame #%d: %zu matches, %d unmatched tracks, %d unmatched dets, %zu total tracks, dt=%.2f, cos_rej=%d",
-           frame_count, matches.size(), num_unmatched_tracks, num_unmatched_dets,
-           tracks_.size(), dt_frames, diag_cosine_rejected_);
-    }
 
     // Step 5: Mark unmatched tracks as missed
     for (size_t i = 0; i < tracks_.size(); i++)
@@ -121,14 +119,12 @@ namespace perception
     {
       if (!matched_detections.count(i))
       {
-        // Filter out tiny detections (likely noise or artifacts)
         const auto &det = detections_with_features[i];
         float width = det.bbox[2] - det.bbox[0];
         float height = det.bbox[3] - det.bbox[1];
         float area = width * height;
 
         // Minimum bbox area threshold (100 pixels = 10x10 bbox)
-        // Prevents creating tracks for noise/artifacts
         if (area >= 100.0f)
         {
           InitiateTrack(detections_with_features[i]);
@@ -137,7 +133,19 @@ namespace perception
     }
 
     // Step 7: Delete old tracks
+    auto t_bookkeep_start = std::chrono::high_resolution_clock::now();
     DeleteOldTracks();
+    auto t_bookkeep_end = std::chrono::high_resolution_clock::now();
+
+    const double ms_predict  = std::chrono::duration<double, std::milli>(t_predict_end   - t_predict_start).count();
+    const double ms_reid     = std::chrono::duration<double, std::milli>(t_reid_end       - t_reid_start).count();
+    const double ms_match    = std::chrono::duration<double, std::milli>(t_match_end      - t_match_start).count();
+    const double ms_bookkeep = std::chrono::duration<double, std::milli>(t_bookkeep_end   - t_bookkeep_start).count();
+    LOGD("DeepSORT #%d: predict=%.2f ms  reid(%zu det)=%.1f ms  match=%.2f ms  bookkeep=%.2f ms"
+         "  [total=%.1f ms]  matched=%zu  unmatched_trk=%d  unmatched_det=%d  tracks=%zu  dt=%.2f",
+         frame_count, ms_predict, detections.size(), ms_reid, ms_match, ms_bookkeep,
+         ms_predict + ms_reid + ms_match + ms_bookkeep,
+         matches.size(), num_unmatched_tracks, num_unmatched_dets, tracks_.size(), dt_frames);
 
     return tracks_;
   }

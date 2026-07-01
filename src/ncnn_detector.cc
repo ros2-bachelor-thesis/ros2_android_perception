@@ -59,166 +59,99 @@ std::vector<Detection> NcnnDetector::Detect(const cv::Mat& image,
     return {};
   }
 
-  // Store original dimensions for coordinate scaling
   int img_width = image.cols;
   int img_height = image.rows;
 
-  // Preprocess: simple resize (no letterbox) to match Python reference
-  auto preprocess_start = std::chrono::high_resolution_clock::now();
-  ncnn::Mat input = ImagePreprocessor::PrepareForYOLO(image, input_width_, input_height_);
-  auto preprocess_end = std::chrono::high_resolution_clock::now();
-  double preprocess_ms = std::chrono::duration<double, std::milli>(preprocess_end - preprocess_start).count();
-  LOGD("NCNN preprocessing: %.1f ms", preprocess_ms);
+  // Python-compatible preprocessing: resize to 640x360, crop 4px top+bottom → 640x352.
+  // Matches Python reference: cv2.resize(rgb, (640,360)), then img[4:-4,:]
+  const float scale = static_cast<float>(input_width_) / img_width;
+  constexpr int kCropTop = 4;
+  constexpr int kResizeH = 360;  // input_height_ (352) + 2*kCropTop
 
-  // Python uses letterbox-style coordinate scaling even with simple resize:
-  // gain = min(model_h / orig_h, model_w / orig_w)
-  // pad = ((model_w - orig_w * gain) / 2, (model_h - orig_h * gain) / 2)
-  // This matches scale_boxes() in utils/general.py line 831-832
-  float gain = std::min(
-      static_cast<float>(input_height_) / img_height,
-      static_cast<float>(input_width_) / img_width
+  auto t_pre0 = std::chrono::high_resolution_clock::now();
+
+  cv::Mat src = image.isContinuous() ? image : image.clone();
+  cv::Mat resized;
+  cv::resize(src, resized, cv::Size(input_width_, kResizeH), 0, 0, cv::INTER_LINEAR);
+  cv::Mat cropped = resized(cv::Rect(0, kCropTop, input_width_, input_height_));
+
+  ncnn::Mat input = ncnn::Mat::from_pixels(
+      cropped.data,
+      ncnn::Mat::PIXEL_BGR2RGB,
+      input_width_, input_height_
   );
-  float pad_w = (input_width_ - img_width * gain) / 2.0f;
-  float pad_h = (input_height_ - img_height * gain) / 2.0f;
+  auto t_pre1 = std::chrono::high_resolution_clock::now();
+  LOGD("[ncnn] resize+crop+from_pixels: %.2f ms",
+       std::chrono::duration<double, std::milli>(t_pre1 - t_pre0).count());
 
-  // Create NCNN extractor
+  const float norm_vals[3] = {1.0f / 255.0f, 1.0f / 255.0f, 1.0f / 255.0f};
+  input.substract_mean_normalize(nullptr, norm_vals);
+  auto t_pre2 = std::chrono::high_resolution_clock::now();
+  LOGD("[ncnn] normalize: %.2f ms",
+       std::chrono::duration<double, std::milli>(t_pre2 - t_pre1).count());
+
   ncnn::Extractor ex = net_.create_extractor();
-  ex.set_light_mode(true);  // Match net_.opt.lightmode for consistency
-  // Note: num_threads is set via net_.opt, not extractor
-
-  // Input image
   ex.input(input_layer_, input);
 
-  // Run inference - YOLOv9 has dual detection heads (out0, out1)
-  auto inference_start = std::chrono::high_resolution_clock::now();
-  ncnn::Mat out0, out1;
-  int ret0 = ex.extract("out0", out0);
-  int ret1 = ex.extract("out1", out1);
-  auto inference_end = std::chrono::high_resolution_clock::now();
-  double inference_ms = std::chrono::duration<double, std::milli>(inference_end - inference_start).count();
-  LOGD("NCNN inference: %.1f ms", inference_ms);
+  ncnn::Mat raw_output;
+  auto t_inf_start = std::chrono::high_resolution_clock::now();
+  int ret = ex.extract(output_layer_, raw_output);
+  auto t_inf_end = std::chrono::high_resolution_clock::now();
+  LOGD("[ncnn] extract: %.1f ms ret=%d",
+       std::chrono::duration<double, std::milli>(t_inf_end - t_inf_start).count(), ret);
 
-  if (ret0 != 0 || ret1 != 0) {
-    LOGE("Inference failed! ret0=%d, ret1=%d", ret0, ret1);
+  if (ret != 0) {
+    LOGE("NCNN extract failed! ret=%d", ret);
     return {};
   }
 
-  // Log output shapes only once for debugging (not on every frame)
-  static bool logged_shapes = false;
-  if (!logged_shapes) {
-    LOGI("NCNN output shapes: out0=[c=%d, h=%d, w=%d] (dims=%d), out1=[c=%d, h=%d, w=%d] (dims=%d)",
-         out0.c, out0.h, out0.w, out0.dims, out1.c, out1.h, out1.w, out1.dims);
-    logged_shapes = true;
-  }
-
-  // Check output format and reshape if needed
-  // Expected: [num_anchors, 7] where 7 = 4 bbox + 3 classes
-  // Common NCNN formats:
-  //   - 2D: [h=num_anchors, w=7] (correct format)
-  //   - 2D transposed: [h=7, w=num_anchors] (needs transpose)
-  //   - 3D: [c=1, h=num_anchors, w=7] (flatten to 2D)
-
-  auto postprocess_start = std::chrono::high_resolution_clock::now();
+  // Normalize output to [N, 4+num_classes_] row layout.
+  // YOLOv9 DualDDetect with export=True outputs [h=7, w=N] (transposed) — transpose back.
   ncnn::Mat output;
-
-  // Cache format detection (log only once)
-  static bool logged_format = false;
-
-  // Case 1: 3D tensor [1, N, 7] - flatten to 2D
-  if (out0.dims == 3 && out0.c == 1) {
-    if (!logged_format) {
-      LOGI("Detected 3D format [c=1, h=%d, w=%d], flattening to 2D", out0.h, out0.w);
-      logged_format = true;
-    }
-    // Reshape both heads to 2D
-    ncnn::Mat out0_2d(out0.w, out0.h);  // [h, w]
-    memcpy(out0_2d.data, out0.data, out0.total() * sizeof(float));
-
-    ncnn::Mat out1_2d(out1.w, out1.h);
-    memcpy(out1_2d.data, out1.data, out1.total() * sizeof(float));
-
-    // Concatenate
-    int total_h = out0_2d.h + out1_2d.h;
-    output = ncnn::Mat(out0_2d.w, total_h);
-    memcpy(output.data, out0_2d.data, out0_2d.total() * sizeof(float));
-    memcpy((float*)output.data + out0_2d.total(), out1_2d.data, out1_2d.total() * sizeof(float));
-  }
-  // Case 2: 2D tensor needs transpose [7, N] → [N, 7]
-  else if (out0.dims == 2 && out0.h == (4 + num_classes_)) {
-    if (!logged_format) {
-      LOGI("Detected transposed format [h=%d, w=%d], transposing", out0.h, out0.w);
-      logged_format = true;
-    }
-    // Transpose: out0[h=7, w=N] → [N, 7]
-    int N0 = out0.w;
-    int N1 = out1.w;
-    int total_anchors = N0 + N1;
-
-    output = ncnn::Mat(4 + num_classes_, total_anchors);
-
-    // Transpose out0
-    for (int i = 0; i < out0.h; i++) {
-      for (int j = 0; j < out0.w; j++) {
-        output.row(j)[i] = out0.row(i)[j];
-      }
-    }
-
-    // Transpose out1 and append
-    for (int i = 0; i < out1.h; i++) {
-      for (int j = 0; j < out1.w; j++) {
-        output.row(N0 + j)[i] = out1.row(i)[j];
-      }
-    }
-  }
-  // Case 3: Already correct 2D format [N, 7]
-  else if (out0.dims == 2 && out0.w == (4 + num_classes_)) {
-    if (!logged_format) {
-      LOGI("Correct 2D format [h=%d, w=%d], concatenating", out0.h, out0.w);
-      logged_format = true;
-    }
-    int total_anchors = out0.h + out1.h;
-    int num_values = out0.w;
-
-    output = ncnn::Mat(num_values, total_anchors);
-
-    // Copy out0 rows first
-    for (int i = 0; i < out0.h; i++) {
-      const float* src = out0.row(i);
-      float* dst = output.row(i);
-      memcpy(dst, src, num_values * sizeof(float));
-    }
-
-    // Copy out1 rows after out0
-    for (int i = 0; i < out1.h; i++) {
-      const float* src = out1.row(i);
-      float* dst = output.row(out0.h + i);
-      memcpy(dst, src, num_values * sizeof(float));
-    }
-  }
-  // Case 4: Unknown format - error
-  else {
-    LOGE("Unsupported NCNN output format: out0=[c=%d, h=%d, w=%d], out1=[c=%d, h=%d, w=%d]",
-         out0.c, out0.h, out0.w, out1.c, out1.h, out1.w);
-    LOGE("Expected: [N, 7] or [7, N] or [1, N, 7]. Check model conversion.");
+  if (raw_output.dims == 2 && raw_output.h == (4 + num_classes_)) {
+    int N = raw_output.w;
+    output = ncnn::Mat(4 + num_classes_, N);
+    for (int i = 0; i < raw_output.h; i++)
+      for (int j = 0; j < raw_output.w; j++)
+        output.row(j)[i] = raw_output.row(i)[j];
+  } else if (raw_output.dims == 2 && raw_output.w == (4 + num_classes_)) {
+    output = raw_output;
+  } else {
+    LOGE("Unexpected output shape: dims=%d h=%d w=%d", raw_output.dims, raw_output.h, raw_output.w);
     return {};
   }
 
-  // Parse output tensor to detections (with letterbox-style scaling)
+  static bool logged_shape = false;
+  if (!logged_shape) {
+    logged_shape = true;
+    LOGI("NCNN out0: raw[h=%d,w=%d,dims=%d] → [N=%d,values=%d]",
+         raw_output.h, raw_output.w, raw_output.dims, output.h, output.w);
+  }
+
+  auto t_reshape_start = std::chrono::high_resolution_clock::now();
+
+  // Inverse-map stretch+crop coordinates back to original image space.
+  // stretch+crop: x_orig = x_m/scale,  y_orig = (y_m + kCropTop)/scale
+  // Reused as letterbox params: gain=scale, pad_w=0, pad_h=-kCropTop
   std::vector<Detection> detections = ParseOutput(
       output,
       img_width,
       img_height,
-      gain,
-      pad_w,
-      pad_h,
+      scale,
+      0.0f,
+      -static_cast<float>(kCropTop),
       conf_threshold);
 
-  // Apply class-aware NMS
+  auto t_parse_end = std::chrono::high_resolution_clock::now();
+
   detections = NMS::ApplyPerClass(detections, iou_threshold);
 
-  auto postprocess_end = std::chrono::high_resolution_clock::now();
-  double postprocess_ms = std::chrono::duration<double, std::milli>(postprocess_end - postprocess_start).count();
-  LOGD("NCNN postprocess (format+parse+NMS): %.1f ms", postprocess_ms);
+  auto t_nms_end = std::chrono::high_resolution_clock::now();
+  const double ms_reshape = std::chrono::duration<double, std::milli>(t_reshape_start - t_inf_end).count();
+  const double ms_parse   = std::chrono::duration<double, std::milli>(t_parse_end - t_reshape_start).count();
+  const double ms_nms     = std::chrono::duration<double, std::milli>(t_nms_end - t_parse_end).count();
+  LOGD("Postprocess: reshape=%.2f ms  parse=%.2f ms  NMS=%.2f ms  [total=%.2f ms]",
+       ms_reshape, ms_parse, ms_nms, ms_reshape + ms_parse + ms_nms);
 
   return detections;
 }
@@ -247,10 +180,28 @@ std::vector<Detection> NcnnDetector::ParseOutput(const ncnn::Mat& output,
     return detections;
   }
 
+  LOGD("ParseOutput: conf_threshold=%.3f", conf_threshold);
+
   if (num_anchors > 0) {
     const float* row0 = output.row(0);
     LOGD("ParseOutput first anchor: [%.2f,%.2f,%.2f,%.2f] scores=[%.3f,%.3f,%.3f]",
          row0[0], row0[1], row0[2], row0[3], row0[4], row0[5], row0[6]);
+
+    // Scan all anchors to find global max score (every frame for diagnosis)
+    {
+      float global_max = -1e9f;
+      int max_anchor = -1;
+      for (int ii = 0; ii < num_anchors; ii++) {
+        const float* r = output.row(ii);
+        for (int c = 0; c < num_classes_; c++) {
+          if (r[4 + c] > global_max) { global_max = r[4 + c]; max_anchor = ii; }
+        }
+      }
+      const float* best_row = output.row(max_anchor >= 0 ? max_anchor : 0);
+      LOGD("ParseOutput score scan: max_score=%.4f at anchor=%d bbox=[%.1f,%.1f,%.1f,%.1f]",
+           global_max, max_anchor,
+           best_row[0], best_row[1], best_row[2], best_row[3]);
+    }
   }
 
   // Iterate over all anchors
